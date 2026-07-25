@@ -18,6 +18,13 @@ RUN pip install --no-cache-dir --upgrade pip build \
 ##########  运行阶段  ##########
 FROM python:3.12-slim AS runtime
 
+# OCI 元数据：关联源码仓库，便于溯源，并让 GHCR 包页自动关联到 GitHub 仓库
+LABEL org.opencontainers.image.source="https://github.com/zhouweico/mcp-nacos" \
+      org.opencontainers.image.title="mcp-nacos" \
+      org.opencontainers.image.description="MCP Server for Nacos configuration management (stdio/sse/streamable-http, token auth)" \
+      org.opencontainers.image.url="https://github.com/zhouweico/mcp-nacos" \
+      org.opencontainers.image.licenses="MIT"
+
 # 运行时环境变量默认值（可在 docker run / compose 中覆盖）
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
