@@ -1,0 +1,36 @@
+services:
+  mcp-nacos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-nacos:latest
+    container_name: mcp-nacos
+    restart: unless-stopped
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    environment:
+      # ---- MCP 传输与认证 ----
+      MCP_TRANSPORT: "${MCP_TRANSPORT:-streamable-http}"   # stdio / sse / streamable-http
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"                # 设置后启用 Bearer Token 认证
+      MCP_LOG_LEVEL: "${MCP_LOG_LEVEL:-info}"
+      # ---- Nacos 连接配置 ----
+      NACOS_HOST: "${NACOS_HOST:-localhost}"
+      NACOS_API_PORT: "${NACOS_API_PORT:-8848}"
+      NACOS_CONSOLE_PORT: "${NACOS_CONSOLE_PORT:-8080}"
+      NACOS_USERNAME: "${NACOS_USERNAME:-}"
+      NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-public}"
+      NACOS_VERSION: "${NACOS_VERSION:-3}"
+      NACOS_READ_ONLY: "${NACOS_READ_ONLY:-false}"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
