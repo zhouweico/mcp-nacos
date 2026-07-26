@@ -1,18 +1,21 @@
 """Nacos MCP Server
 
 提供与 Nacos 配置中心交互的 MCP 工具。
-支持 Nacos 3.x 版本。
+支持 Nacos 1.x / 2.x / 3.x（默认 3.x，由 NACOS_VERSION 决定）。
+
+所有工具的最新说明见各工具 docstring；工具入参均为扁平字段（非嵌套对象），
+便于 MCP 客户端与 LLM 直接填充。
 """
 
 import json
 import logging
 import os
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Annotated, Any, Optional, cast
 
 import httpx
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from .auth import TokenAuthMiddleware
 from .client import get_nacos_client
@@ -42,78 +45,9 @@ class ConfigType(str, Enum):
     TOML = "toml"
 
 
-class GetConfigInput(BaseModel):
-    """获取配置的输入参数"""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        validate_assignment=True,
-        extra="forbid",
-    )
-
-    data_id: str = Field(
-        ...,
-        description="配置 ID，如 'application.yaml'、'user-service.yml'",
-        min_length=1,
-        max_length=256,
-    )
-    group_name: str = Field(
-        default="DEFAULT_GROUP",
-        description="配置分组，默认 DEFAULT_GROUP",
-        min_length=1,
-        max_length=128,
-    )
-    namespace_id: Optional[str] = Field(
-        default=None,
-        description=(
-            "命名空间 ID，如 'dev'、'prod'。"
-            "优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public"
-        ),
-    )
-    response_format: ResponseFormat = Field(
-        default=ResponseFormat.MARKDOWN,
-        description="输出格式：markdown 或 json",
-    )
-
-
-class PublishConfigInput(BaseModel):
-    """发布配置的输入参数"""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        validate_assignment=True,
-        extra="forbid",
-    )
-
-    data_id: str = Field(
-        ...,
-        description="配置 ID，如 'application.yaml'",
-        min_length=1,
-        max_length=256,
-    )
-    group_name: str = Field(
-        default="DEFAULT_GROUP",
-        description="配置分组",
-        min_length=1,
-        max_length=128,
-    )
-    namespace_id: Optional[str] = Field(
-        default=None,
-        description="命名空间 ID，优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public",
-    )
-    content: str = Field(
-        ...,
-        description="配置内容",
-        min_length=1,
-    )
-    config_type: ConfigType = Field(
-        default=ConfigType.YAML,
-        description="配置类型：yaml, json, properties, text 等",
-    )
-    desc: Optional[str] = Field(
-        default=None,
-        description="配置描述",
-    )
+def _to_json(data: Any) -> str:
+    """将对象序列化为可读 JSON 字符串"""
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def handle_error(e: Exception) -> str:
@@ -147,35 +81,44 @@ def handle_error(e: Exception) -> str:
         },
     ),
 )
-async def nacos_get_config(params: GetConfigInput) -> str:
-    """获取 Nacos 配置内容。
+async def nacos_get_config(
+    data_id: Annotated[str, Field(description="配置 ID，如 'application.yaml'、'user-service.yml'", min_length=1, max_length=256)],
+    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，如 'dev'、'prod'。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public")] = None,
+    response_format: Annotated[ResponseFormat, Field(description="输出格式：markdown 或 json")] = ResponseFormat.MARKDOWN,
+) -> str:
+    """获取 Nacos 配置内容（2.1，只读）。
 
-    从 Nacos 配置中心获取指定的配置内容。
+    对应 Nacos OpenAPI：
+    - v1：GET /nacos/v1/cs/configs（参数 tenant）
+    - v2：GET /nacos/v2/cs/config（参数 namespaceId）
+    - v3：GET /v3/console/cs/config（Console API，端口 8080）
+
+    按 dataId + group + namespace 唯一定位配置，返回配置内容。
+    namespace 优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public。
 
     参数：
-        params: 包含以下内容的验证输入参数：
-            - data_id: 配置 ID
-            - group_name: 配置分组，默认 DEFAULT_GROUP
-            - namespace_id: 命名空间 ID，可选
-            - response_format: 输出格式，markdown 或 json
-
+        data_id：配置 ID（必填）
+        group_name：分组，默认 DEFAULT_GROUP
+        namespace_id：命名空间，可选，优先级：参数 > NACOS_NAMESPACE > public
+        response_format：输出格式，markdown 或 json
     返回：
         配置内容（Markdown 或 JSON 格式）
     """
     try:
         nacos_client = await get_nacos_client()
         data = await nacos_client.get_config(
-            data_id=params.data_id,
-            group_name=params.group_name,
-            namespace_id=params.namespace_id,
+            data_id=data_id,
+            group_name=group_name,
+            namespace_id=namespace_id,
         )
 
         # 配置不存在
         if not data or not data.get("content"):
-            ns = params.namespace_id or nacos_client.default_namespace
-            return f"配置不存在：dataId={params.data_id}, group={params.group_name}, namespace={ns}"
+            ns = namespace_id or nacos_client.default_namespace
+            return f"配置不存在：dataId={data_id}, group={group_name}, namespace={ns}"
 
-        if params.response_format == ResponseFormat.JSON:
+        if response_format == ResponseFormat.JSON:
             return json.dumps(
                 {
                     "data_id": data.get("dataId"),
@@ -217,6 +160,228 @@ async def nacos_get_config(params: GetConfigInput) -> str:
         return handle_error(e)
 
 
+@mcp.tool(
+    name="nacos_list_config_history",
+    annotations=cast(
+        Any,
+        {
+            "title": "查询配置历史版本列表",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+)
+async def nacos_list_config_history(
+    data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
+    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
+    page_no: Annotated[int, Field(description="页码，默认 1", ge=1)] = 1,
+    page_size: Annotated[int, Field(description="每页条数，默认 100", ge=1, le=500)] = 100,
+) -> str:
+    """查询配置历史版本列表（2.14，只读）。
+
+    对应 Nacos OpenAPI：
+    - v1：GET /nacos/v1/cs/history
+    - v2：GET /nacos/v2/cs/history/list
+    - v3：GET /v3/console/cs/history/list（Console API）
+
+    返回分页的历史版本列表（id、opType、操作人、时间等）。
+
+    参数：
+        data_id：配置 ID（必填）
+        group_name：分组，默认 DEFAULT_GROUP
+        namespace_id：命名空间，可选
+        page_no：页码，默认 1
+        page_size：每页条数，默认 100
+    返回：
+        历史版本列表（JSON）
+    """
+    try:
+        nacos_client = await get_nacos_client()
+        data = await nacos_client.list_config_history(
+            data_id=data_id,
+            group_name=group_name,
+            namespace_id=namespace_id,
+            page_no=page_no,
+            page_size=page_size,
+        )
+        return _to_json(data)
+    except Exception as e:
+        return handle_error(e)
+
+
+@mcp.tool(
+    name="nacos_get_config_history",
+    annotations=cast(
+        Any,
+        {
+            "title": "查询具体历史版本配置",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+)
+async def nacos_get_config_history(
+    nid: Annotated[int, Field(description="历史版本 ID（nid），必填", ge=0)],
+    data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
+    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
+) -> str:
+    """查询某次历史变更记录（2.15，只读）。
+
+    对应 Nacos OpenAPI：
+    - v1：GET /nacos/v1/cs/history
+    - v2：GET /nacos/v2/cs/history
+    - v3：GET /v3/console/cs/history（Console API）
+
+    按历史记录 ID（nid）返回该次变更的完整配置内容。
+
+    参数：
+        nid：历史版本 ID，必填
+        data_id：配置 ID
+        group_name：分组，默认 DEFAULT_GROUP
+        namespace_id：命名空间，可选
+    返回：
+        该次历史变更的完整配置内容（JSON）
+    """
+    try:
+        nacos_client = await get_nacos_client()
+        data = await nacos_client.get_config_history(
+            nid=nid,
+            data_id=data_id,
+            group_name=group_name,
+            namespace_id=namespace_id,
+        )
+        return _to_json(data)
+    except Exception as e:
+        return handle_error(e)
+
+
+@mcp.tool(
+    name="nacos_get_config_previous",
+    annotations=cast(
+        Any,
+        {
+            "title": "查询配置上一版本",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+)
+async def nacos_get_config_previous(
+    config_id: Annotated[int, Field(description="配置存储 ID（对应历史接口中的 id 字段），必填", ge=0)],
+    data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
+    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
+) -> str:
+    """查询配置最新状态的前一次变更历史（2.16，只读）。
+
+    对应 Nacos OpenAPI：
+    - v1：GET /nacos/v1/cs/history/previous
+    - v2：GET /nacos/v2/cs/history/previous
+    - v3：GET /v3/console/cs/history/previous（Console API）
+
+    按配置存储 ID（id）返回上一版本的完整配置内容。
+
+    参数：
+        config_id：配置存储 ID，必填
+        data_id：配置 ID
+        group_name：分组，默认 DEFAULT_GROUP
+        namespace_id：命名空间，可选
+    返回：
+        上一版本完整配置内容（JSON）
+    """
+    try:
+        nacos_client = await get_nacos_client()
+        data = await nacos_client.get_config_previous(
+            config_id=config_id,
+            data_id=data_id,
+            group_name=group_name,
+            namespace_id=namespace_id,
+        )
+        return _to_json(data)
+    except Exception as e:
+        return handle_error(e)
+
+
+@mcp.tool(
+    name="nacos_list_namespaces",
+    annotations=cast(
+        Any,
+        {
+            "title": "查询命名空间列表",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+)
+async def nacos_list_namespaces() -> str:
+    """查询命名空间列表（1.7，只读）。
+
+    对应 Nacos OpenAPI：
+    - v1：GET /nacos/v1/console/namespaces
+    - v2：GET /nacos/v2/console/namespace/list
+    - v3：GET /v3/console/core/namespace/list（Console API）
+
+    返回当前 Nacos 实例下的所有命名空间（含 public，及每个命名空间的配额与使用量）。
+
+    参数：无
+    返回：命名空间列表（JSON）
+    """
+    try:
+        nacos_client = await get_nacos_client()
+        data = await nacos_client.list_namespaces()
+        return _to_json(data)
+    except Exception as e:
+        return handle_error(e)
+
+
+@mcp.tool(
+    name="nacos_get_namespace",
+    annotations=cast(
+        Any,
+        {
+            "title": "查询单个命名空间",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+)
+async def nacos_get_namespace(
+    namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+) -> str:
+    """查询单个命名空间详情（1.8，只读）。
+
+    对应 Nacos OpenAPI：
+    - v1：官方无单查接口，由命名空间列表过滤模拟
+    - v2：GET /nacos/v2/console/namespace
+    - v3：GET /v3/console/core/namespace（Console API）
+
+    按 namespace_id 返回该命名空间的配额、使用量等详情。
+
+    参数：
+        namespace_id：命名空间 ID，必填，优先级：参数 > 环境变量 NACOS_NAMESPACE > 默认 public
+    返回：
+        命名空间详情（JSON）
+    """
+    try:
+        nacos_client = await get_nacos_client()
+        data = await nacos_client.get_namespace(namespace_id=namespace_id)
+        return _to_json(data)
+    except Exception as e:
+        return handle_error(e)
+
+
 # 只读模式检查
 _read_only = os.getenv("NACOS_READ_ONLY", "false").lower() == "true"
 
@@ -235,50 +400,247 @@ if not _read_only:
             },
         ),
     )
-    async def nacos_publish_config(params: PublishConfigInput) -> str:
-        """发布 Nacos 配置。
+    async def nacos_publish_config(
+        data_id: Annotated[str, Field(description="配置 ID，如 'application.yaml'", min_length=1, max_length=256)],
+        content: Annotated[str, Field(description="配置内容", min_length=1)],
+        group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+        namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选，优先级：参数 > NACOS_NAMESPACE > public")] = None,
+        config_type: Annotated[ConfigType, Field(description="配置类型：yaml, json, properties, text 等")] = ConfigType.YAML,
+        desc: Annotated[Optional[str], Field(description="配置描述，可选")] = None,
+    ) -> str:
+        """发布/更新 Nacos 配置（创建或覆盖已有配置）。
 
-        创建新配置或更新已有配置。
+        对应 Nacos OpenAPI：
+        - v1：POST /nacos/v1/cs/configs（参数 tenant）
+        - v2：POST /nacos/v2/cs/config（参数 namespaceId）
+        - v3：POST /v3/console/cs/config（Console API）
+
+        创建新配置或覆盖已有配置（dataId + group + namespace 唯一确定），发布即生效。
+        本工具在 NACOS_READ_ONLY=true 时不注册。
 
         参数：
-            params: 包含以下内容的验证输入参数：
-                - data_id: 配置 ID
-                - group_name: 配置分组，默认 DEFAULT_GROUP
-                - namespace_id: 命名空间 ID，可选
-                - content: 配置内容
-                - config_type: 配置类型，默认 yaml
-                - desc: 配置描述，可选
-
+            data_id：配置 ID（必填）
+            content：配置内容（必填）
+            group_name：分组，默认 DEFAULT_GROUP
+            namespace_id：命名空间，可选
+            config_type：类型，默认 yaml
+            desc：描述，可选
         返回：
-            发布结果
+            发布结果（成功/失败）
         """
         try:
             nacos_client = await get_nacos_client()
             success = await nacos_client.publish_config(
-                data_id=params.data_id,
-                content=params.content,
-                group_name=params.group_name,
-                namespace_id=params.namespace_id,
-                config_type=params.config_type.value,
-                desc=params.desc,
+                data_id=data_id,
+                content=content,
+                group_name=group_name,
+                namespace_id=namespace_id,
+                config_type=config_type.value,
+                desc=desc,
             )
 
             if success:
-                ns = params.namespace_id or nacos_client.default_namespace
+                ns = namespace_id or nacos_client.default_namespace
                 lines = [
                     "配置发布成功",
                     "",
                     "| 属性 | 值 |",
                     "|------|-----|",
-                    f"| Data ID | {params.data_id} |",
-                    f"| Group | {params.group_name} |",
+                    f"| Data ID | {data_id} |",
+                    f"| Group | {group_name} |",
                     f"| Namespace | {ns} |",
-                    f"| Type | {params.config_type.value} |",
+                    f"| Type | {config_type.value} |",
                 ]
                 return "\n".join(lines)
             else:
                 return "配置发布失败：未知原因"
 
+        except Exception as e:
+            return handle_error(e)
+
+    @mcp.tool(
+        name="nacos_delete_config",
+        annotations=cast(
+            Any,
+            {
+                "title": "删除 Nacos 配置",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        ),
+    )
+    async def nacos_delete_config(
+        data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
+        group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+        namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
+    ) -> str:
+        """删除 Nacos 配置（按 dataId + group + namespace 唯一删除）。
+
+        对应 Nacos OpenAPI：
+        - v1：DELETE /nacos/v1/cs/configs
+        - v2：DELETE /nacos/v2/cs/config
+        - v3：DELETE /v3/console/cs/config（Console API）
+
+        按 dataId + group + namespace 唯一删除配置；
+        本工具在 NACOS_READ_ONLY=true 时不注册。
+
+        参数：
+            data_id：配置 ID（必填）
+            group_name：分组，默认 DEFAULT_GROUP
+            namespace_id：命名空间，可选
+        返回：
+            删除结果（成功/失败）
+        """
+        try:
+            nacos_client = await get_nacos_client()
+            success = await nacos_client.delete_config(
+                data_id=data_id,
+                group_name=group_name,
+                namespace_id=namespace_id,
+            )
+            ns = namespace_id or nacos_client.default_namespace
+            if success:
+                return (
+                    f"配置删除成功：dataId={data_id}, "
+                    f"group={group_name}, namespace={ns}"
+                )
+            return "配置删除失败：未知原因"
+        except Exception as e:
+            return handle_error(e)
+
+    @mcp.tool(
+        name="nacos_create_namespace",
+        annotations=cast(
+            Any,
+            {
+                "title": "创建命名空间",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        ),
+    )
+    async def nacos_create_namespace(
+        namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+        namespace_name: Annotated[str, Field(description="命名空间名称", min_length=1)],
+        namespace_desc: Annotated[Optional[str], Field(description="命名空间描述，可选")] = None,
+    ) -> str:
+        """创建 Nacos 命名空间（指定命名空间 ID 与名称）。
+
+        对应 Nacos OpenAPI：
+        - v1：POST /nacos/v1/console/namespaces（参数 customNamespaceId）
+        - v2：POST /nacos/v2/console/namespace（参数 namespaceId）
+        - v3：POST /v3/console/core/namespace（Console API，参数 customNamespaceId）
+
+        创建命名空间并指定其 ID；本工具在 NACOS_READ_ONLY=true 时不注册。
+
+        参数：
+            namespace_id：命名空间 ID，必填
+            namespace_name：命名空间名称，必填
+            namespace_desc：描述，可选
+        返回：
+            创建结果（成功/失败）
+        """
+        try:
+            nacos_client = await get_nacos_client()
+            success = await nacos_client.create_namespace(
+                namespace_id=namespace_id,
+                namespace_name=namespace_name,
+                namespace_desc=namespace_desc,
+            )
+            if success:
+                return f"命名空间创建成功：namespaceId={namespace_id}"
+            return "命名空间创建失败：未知原因"
+        except Exception as e:
+            return handle_error(e)
+
+    @mcp.tool(
+        name="nacos_update_namespace",
+        annotations=cast(
+            Any,
+            {
+                "title": "编辑命名空间",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        ),
+    )
+    async def nacos_update_namespace(
+        namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+        namespace_name: Annotated[str, Field(description="命名空间名称，必填", min_length=1)],
+        namespace_desc: Annotated[Optional[str], Field(description="命名空间描述，可选")] = None,
+    ) -> str:
+        """更新命名空间名称/描述。
+
+        对应 Nacos OpenAPI：
+        - v1：POST /nacos/v1/console/namespaces（参数 namespace）
+        - v2：PUT /nacos/v2/console/namespace（参数 namespaceId）
+        - v3：PUT /v3/console/core/namespace（Console API）
+
+        修改命名空间的名称或描述；本工具在 NACOS_READ_ONLY=true 时不注册。
+
+        参数：
+            namespace_id：命名空间 ID，必填
+            namespace_name：新名称，必填
+            namespace_desc：新描述，可选
+        返回：
+            更新结果（成功/失败）
+        """
+        try:
+            nacos_client = await get_nacos_client()
+            success = await nacos_client.update_namespace(
+                namespace_id=namespace_id,
+                namespace_name=namespace_name,
+                namespace_desc=namespace_desc,
+            )
+            if success:
+                return f"命名空间更新成功：namespaceId={namespace_id}"
+            return "命名空间更新失败：未知原因"
+        except Exception as e:
+            return handle_error(e)
+
+    @mcp.tool(
+        name="nacos_delete_namespace",
+        annotations=cast(
+            Any,
+            {
+                "title": "删除命名空间",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        ),
+    )
+    async def nacos_delete_namespace(
+        namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+    ) -> str:
+        """删除指定命名空间。
+
+        对应 Nacos OpenAPI：
+        - v1：DELETE /nacos/v1/console/namespaces（参数 namespaceId）
+        - v2：DELETE /nacos/v2/console/namespace（参数 namespaceId）
+        - v3：DELETE /v3/console/core/namespace（Console API）
+
+        删除命名空间会一并清除其下所有配置；
+        本工具在 NACOS_READ_ONLY=true 时不注册。
+
+        参数：
+            namespace_id：命名空间 ID，必填
+        返回：
+            删除结果（成功/失败）
+        """
+        try:
+            nacos_client = await get_nacos_client()
+            success = await nacos_client.delete_namespace(namespace_id=namespace_id)
+            if success:
+                return f"命名空间删除成功：namespaceId={namespace_id}"
+            return "命名空间删除失败：未知原因"
         except Exception as e:
             return handle_error(e)
 

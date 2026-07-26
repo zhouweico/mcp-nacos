@@ -12,6 +12,7 @@ class NacosClientProtocol(Protocol):
 
     default_namespace: str
 
+    # ---- 配置读取 / 写入 ----
     async def get_config(
         self,
         data_id: str,
@@ -28,6 +29,60 @@ class NacosClientProtocol(Protocol):
         config_type: str = "yaml",
         desc: Optional[str] = None,
     ) -> bool: ...
+
+    async def delete_config(
+        self,
+        data_id: str,
+        group_name: str = "DEFAULT_GROUP",
+        namespace_id: Optional[str] = None,
+    ) -> bool: ...
+
+    # ---- 配置历史 ----
+    async def list_config_history(
+        self,
+        data_id: str,
+        group_name: str = "DEFAULT_GROUP",
+        namespace_id: Optional[str] = None,
+        page_no: int = 1,
+        page_size: int = 100,
+    ) -> Any: ...
+
+    async def get_config_history(
+        self,
+        nid: int,
+        data_id: str,
+        group_name: str = "DEFAULT_GROUP",
+        namespace_id: Optional[str] = None,
+    ) -> Any: ...
+
+    async def get_config_previous(
+        self,
+        config_id: int,
+        data_id: str,
+        group_name: str = "DEFAULT_GROUP",
+        namespace_id: Optional[str] = None,
+    ) -> Any: ...
+
+    # ---- 命名空间 ----
+    async def list_namespaces(self) -> Any: ...
+
+    async def get_namespace(self, namespace_id: str) -> Any: ...
+
+    async def create_namespace(
+        self,
+        namespace_id: str,
+        namespace_name: str,
+        namespace_desc: Optional[str] = None,
+    ) -> bool: ...
+
+    async def update_namespace(
+        self,
+        namespace_id: str,
+        namespace_name: str,
+        namespace_desc: Optional[str] = None,
+    ) -> bool: ...
+
+    async def delete_namespace(self, namespace_id: str) -> bool: ...
 
 
 class NacosAuthBase:
@@ -46,6 +101,13 @@ class NacosAuthBase:
     def base_url(self) -> str:
         """基础 URL"""
         return f"http://{self.host}:{self.port}"
+
+    @staticmethod
+    def _unwrap(result: dict[str, Any]) -> Any:
+        """校验 2.x 风格信封返回 {code, message, data} 并取出 data"""
+        if result.get("code") != 0:
+            raise Exception(result.get("message", "Unknown error"))
+        return result.get("data")
 
     async def _ensure_token(self) -> Optional[str]:
         """确保有有效的 access token（如果需要认证）"""

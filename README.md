@@ -103,10 +103,43 @@ docker run -d -p 8000:8000 \
 
 ## 可用工具
 
-| 工具 | 说明 |
-|------|------|
-| `nacos_get_config` | 获取配置内容 |
-| `nacos_publish_config` | 发布/更新配置（只读模式下不可用） |
+| 工具 | 对应 Nacos OpenAPI | 类型 | 说明 | 只读模式 |
+|------|------|------|------|----------|
+| `nacos_get_config` | GET `/cs/config` | 只读 | 按 dataId + group + namespace 获取配置内容 | ✅ 可用 |
+| `nacos_publish_config` | POST `/cs/config` | 写 | 发布/更新配置（dataId + group + namespace 唯一确定） | ❌ 禁用 |
+| `nacos_delete_config` | DELETE `/cs/config` | 写 | 删除配置 | ❌ 禁用 |
+| `nacos_list_config_history` | GET `/cs/history/list`（2.14） | 只读 | 配置历史版本列表（分页） | ✅ 可用 |
+| `nacos_get_config_history` | GET `/cs/history`（2.15） | 只读 | 指定历史版本（nid）详情 | ✅ 可用 |
+| `nacos_get_config_previous` | GET `/cs/history/previous`（2.16） | 只读 | 配置上一版本信息（id） | ✅ 可用 |
+| `nacos_list_namespaces` | GET `/console/namespace/list` | 只读 | 查询所有命名空间 | ✅ 可用 |
+| `nacos_get_namespace` | GET `/console/namespace` | 只读 | 查询单个命名空间（v1 由列表过滤模拟） | ✅ 可用 |
+| `nacos_create_namespace` | POST `/console/namespace` | 写 | 创建命名空间 | ❌ 禁用 |
+| `nacos_update_namespace` | PUT `/console/namespace` | 写 | 编辑命名空间名称/描述 | ❌ 禁用 |
+| `nacos_delete_namespace` | DELETE `/console/namespace` | 写 | 删除命名空间 | ❌ 禁用 |
+
+> 版本路径前缀不同，同一工具在 v1 / v2 / v3 下命中的端点不同：
+> - v1：`/nacos/v1`（API 端口 8848）
+> - v2：`/nacos/v2`（API 端口 8848）
+> - v3：`/nacos/v3/console`（Console API，端口 8080，accessToken 鉴权）
+>
+> 其中 v3 的命名空间路径额外带 `/core/` 段（如 `/v3/console/core/namespace/list`），创建命名空间用 `customNamespaceId`（与 v1 一致），编辑/删除用 `namespaceId`。
+
+> 标注"❌ 禁用"的工具在 `NACOS_READ_ONLY=true` 时**不注册**（注册期排除，非运行期拦截），Agent 既看不到也无法调用；"✅ 可用"的只读工具在只读模式下仍可使用。生产环境开启只读后，Agent 只能查询、绝无意外改配置的风险。
+
+> 历史版本（2.14 / 2.15 / 2.16）与命名空间相关接口覆盖 Nacos 1.x / 2.x / 3.x（除"监听配置"长轮询外）。v3 历史接口已对照官方 Console API 文档核实，路径为 `/v3/console/cs/history/*`。
+
+### Nacos 概念说明
+
+Nacos 配置的组织层级为：**命名空间（namespace）> 分组（group）> 配置（dataId）**，三者共同唯一确定一个配置项：
+
+- **namespace（命名空间）**：用于隔离不同环境或租户（如 dev / test / prod）。不指定时回退 `NACOS_NAMESPACE`，默认 `public`。
+- **group（分组）**：同一命名空间下的逻辑分组，默认 `DEFAULT_GROUP`。
+- **dataId（配置 ID）**：配置项的唯一标识，通常对应文件名（如 `application.yaml`、`user-service.yml`）。
+- **配置格式（type）**：`yaml` / `json` / `properties` / `text` / `xml` / `toml` 等，发布时通过 `config_type` 指定。
+
+> 版本差异提示：1.x 用 `tenant` 表示命名空间 ID，2.x/3.x 收敛为 `namespaceId`；3.x 控制台 API 创建命名空间又回到 `customNamespaceId`（与 1.x 一致）。本 MCP Server 已按版本自动适配这些字段名，调用方只需传 `namespace_id` 即可。
+
+## 配置
 
 ## 配置
 
@@ -234,6 +267,18 @@ docker compose up -d
 获取 gateway 的配置，分组是 PROD_GROUP
 ```
 
+```
+列出 dev 命名空间下的所有命名空间
+```
+
+```
+查看 prod 命名空间里 application 这个配置的历史版本，第 1 页
+```
+
+```
+查一下 application 配置 nid 为 123 的那次历史变更内容
+```
+
 **发布配置：**
 
 ```
@@ -244,6 +289,10 @@ server:
 
 ```
 更新 user-service 的配置，把数据库端口改成 3307
+```
+
+```
+新建一个命名空间，id 为 order-prod，名称 "订单生产环境"
 ```
 
 ## License
