@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Annotated, Any, Optional, cast
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from pydantic import Field
 
 from .auth import TokenAuthMiddleware
@@ -23,7 +23,7 @@ from .client import get_nacos_client
 logger = logging.getLogger(__name__)
 
 # 创建 MCP Server
-mcp = FastMCP("nacos_mcp")
+mcp = MCPServer("nacos_mcp")
 
 
 class ResponseFormat(str, Enum):
@@ -51,7 +51,7 @@ def _ro(title: str) -> Any:
         Any,
         {
             "title": title,
-            "readOnlyHint": True,
+            "read_only_hint": True,
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": True,
@@ -65,7 +65,7 @@ def _rw(title: str, destructive: bool = False, idempotent: bool = False) -> Any:
         Any,
         {
             "title": title,
-            "readOnlyHint": False,
+            "read_only_hint": False,
             "destructiveHint": destructive,
             "idempotentHint": idempotent,
             "openWorldHint": True,
@@ -98,10 +98,29 @@ def handle_error(e: Exception) -> str:
 
 @mcp.tool(name="nacos_get_config", annotations=_ro("获取 Nacos 配置"))
 async def nacos_get_config(
-    data_id: Annotated[str, Field(description="配置 ID，如 'application.yaml'、'user-service.yml'", min_length=1, max_length=256)],
-    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
-    namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，如 'dev'、'prod'。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public")] = None,
-    response_format: Annotated[ResponseFormat, Field(description="输出格式：markdown 或 json")] = ResponseFormat.MARKDOWN,
+    data_id: Annotated[
+        str,
+        Field(
+            description="配置 ID，如 'application.yaml'、'user-service.yml'",
+            min_length=1,
+            max_length=256,
+        ),
+    ],
+    group_name: Annotated[
+        str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
+    ] = "DEFAULT_GROUP",
+    namespace_id: Annotated[
+        Optional[str],
+        Field(
+            description=(
+                "命名空间 ID（如 dev/prod）；优先级：工具参数 > "
+                "NACOS_NAMESPACE 环境变量 > 默认 public"
+            )
+        ),
+    ] = None,
+    response_format: Annotated[
+        ResponseFormat, Field(description="输出格式：markdown 或 json")
+    ] = ResponseFormat.MARKDOWN,
 ) -> str:
     """获取 Nacos 配置内容（2.1，只读）。
 
@@ -170,7 +189,9 @@ async def nacos_get_config(
 @mcp.tool(name="nacos_list_config_history", annotations=_ro("查询配置历史版本列表"))
 async def nacos_list_config_history(
     data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
-    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    group_name: Annotated[
+        str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
+    ] = "DEFAULT_GROUP",
     namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
     page_no: Annotated[int, Field(description="页码，默认 1", ge=1)] = 1,
     page_size: Annotated[int, Field(description="每页条数，默认 100", ge=1, le=500)] = 100,
@@ -202,7 +223,9 @@ async def nacos_list_config_history(
 async def nacos_get_config_history(
     nid: Annotated[int, Field(description="历史版本 ID（nid），必填", ge=0)],
     data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
-    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    group_name: Annotated[
+        str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
+    ] = "DEFAULT_GROUP",
     namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
 ) -> str:
     """查询某次历史变更记录（2.15，只读）。
@@ -229,9 +252,13 @@ async def nacos_get_config_history(
 
 @mcp.tool(name="nacos_get_config_previous", annotations=_ro("查询配置上一版本"))
 async def nacos_get_config_previous(
-    config_id: Annotated[int, Field(description="配置存储 ID（对应历史接口中的 id 字段），必填", ge=0)],
+    config_id: Annotated[
+        int, Field(description="配置存储 ID（对应历史接口中的 id 字段），必填", ge=0)
+    ],
     data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
-    group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+    group_name: Annotated[
+        str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
+    ] = "DEFAULT_GROUP",
     namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
 ) -> str:
     """查询配置最新状态的前一次变更历史（2.16，只读）。
@@ -277,7 +304,13 @@ async def nacos_list_namespaces() -> str:
 
 @mcp.tool(name="nacos_get_namespace", annotations=_ro("查询单个命名空间"))
 async def nacos_get_namespace(
-    namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+    namespace_id: Annotated[
+        str,
+        Field(
+            description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public",
+            min_length=1,
+        ),
+    ],
 ) -> str:
     """查询单个命名空间详情（1.8，只读）。
 
@@ -303,11 +336,20 @@ if not _read_only:
 
     @mcp.tool(name="nacos_publish_config", annotations=_rw("发布 Nacos 配置", idempotent=True))
     async def nacos_publish_config(
-        data_id: Annotated[str, Field(description="配置 ID，如 'application.yaml'", min_length=1, max_length=256)],
+        data_id: Annotated[
+            str, Field(description="配置 ID，如 'application.yaml'", min_length=1, max_length=256)
+        ],
         content: Annotated[str, Field(description="配置内容", min_length=1)],
-        group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
-        namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选，优先级：参数 > NACOS_NAMESPACE > public")] = None,
-        config_type: Annotated[ConfigType, Field(description="配置类型：yaml, json, properties, text 等")] = ConfigType.YAML,
+        group_name: Annotated[
+            str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
+        ] = "DEFAULT_GROUP",
+        namespace_id: Annotated[
+            Optional[str],
+            Field(description="命名空间 ID，可选，优先级：参数 > NACOS_NAMESPACE > public"),
+        ] = None,
+        config_type: Annotated[
+            ConfigType, Field(description="配置类型：yaml, json, properties, text 等")
+        ] = ConfigType.YAML,
         desc: Annotated[Optional[str], Field(description="配置描述，可选")] = None,
     ) -> str:
         """发布/更新 Nacos 配置（创建或覆盖已有配置，发布即生效）。
@@ -349,10 +391,15 @@ if not _read_only:
         except Exception as e:
             return handle_error(e)
 
-    @mcp.tool(name="nacos_delete_config", annotations=_rw("删除 Nacos 配置", destructive=True, idempotent=True))
+    @mcp.tool(
+        name="nacos_delete_config",
+        annotations=_rw("删除 Nacos 配置", destructive=True, idempotent=True),
+    )
     async def nacos_delete_config(
         data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
-        group_name: Annotated[str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)] = "DEFAULT_GROUP",
+        group_name: Annotated[
+            str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
+        ] = "DEFAULT_GROUP",
         namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
     ) -> str:
         """删除 Nacos 配置（按 dataId + group + namespace 唯一删除）。
@@ -371,17 +418,23 @@ if not _read_only:
             )
             ns = namespace_id or nacos_client.default_namespace
             if success:
-                return (
-                    f"配置删除成功：dataId={data_id}, "
-                    f"group={group_name}, namespace={ns}"
-                )
+                return f"配置删除成功：dataId={data_id}, group={group_name}, namespace={ns}"
             return "配置删除失败：未知原因"
         except Exception as e:
             return handle_error(e)
 
     @mcp.tool(name="nacos_create_namespace", annotations=_rw("创建命名空间"))
     async def nacos_create_namespace(
-        namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+        namespace_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "命名空间 ID；优先级：工具参数 > "
+                    "NACOS_NAMESPACE 环境变量 > 默认 public"
+                ),
+                min_length=1,
+            ),
+        ],
         namespace_name: Annotated[str, Field(description="命名空间名称", min_length=1)],
         namespace_desc: Annotated[Optional[str], Field(description="命名空间描述，可选")] = None,
     ) -> str:
@@ -407,7 +460,16 @@ if not _read_only:
 
     @mcp.tool(name="nacos_update_namespace", annotations=_rw("编辑命名空间", idempotent=True))
     async def nacos_update_namespace(
-        namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+        namespace_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "命名空间 ID；优先级：工具参数 > "
+                    "NACOS_NAMESPACE 环境变量 > 默认 public"
+                ),
+                min_length=1,
+            ),
+        ],
         namespace_name: Annotated[str, Field(description="命名空间名称，必填", min_length=1)],
         namespace_desc: Annotated[Optional[str], Field(description="命名空间描述，可选")] = None,
     ) -> str:
@@ -431,9 +493,21 @@ if not _read_only:
         except Exception as e:
             return handle_error(e)
 
-    @mcp.tool(name="nacos_delete_namespace", annotations=_rw("删除命名空间", destructive=True, idempotent=True))
+    @mcp.tool(
+        name="nacos_delete_namespace",
+        annotations=_rw("删除命名空间", destructive=True, idempotent=True),
+    )
     async def nacos_delete_namespace(
-        namespace_id: Annotated[str, Field(description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public", min_length=1)],
+        namespace_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "命名空间 ID；优先级：工具参数 > "
+                    "NACOS_NAMESPACE 环境变量 > 默认 public"
+                ),
+                min_length=1,
+            ),
+        ],
     ) -> str:
         """删除指定命名空间（会一并清除其下所有配置）。
 
@@ -464,9 +538,7 @@ def _normalize_transport(raw: Optional[str]) -> str:
         return "sse"
     if value in {"streamable-http", "streamablehttp", "http"}:
         return "streamable-http"
-    raise ValueError(
-        f"不支持的 MCP_TRANSPORT: {raw!r}，仅支持 stdio、sse、streamable-http"
-    )
+    raise ValueError(f"不支持的 MCP_TRANSPORT: {raw!r}，仅支持 stdio、sse、streamable-http")
 
 
 def _run_http(transport: str) -> None:
@@ -476,10 +548,6 @@ def _run_http(transport: str) -> None:
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8000"))
 
-    # 同步 FastMCP 内部设置，保证其构造的路由使用一致的 host/port
-    mcp.settings.host = host
-    mcp.settings.port = port
-
     if transport == "sse":
         app: Any = mcp.sse_app()
         endpoint = "/sse"
@@ -487,20 +555,30 @@ def _run_http(transport: str) -> None:
         app = mcp.streamable_http_app()
         endpoint = "/mcp"
 
+    # 健康检查路由：在鉴权中间件包裹之前挂载，保证无论是否开启鉴权都能探活。
+    # MCPServer 原生 app 仅暴露 /mcp（或 /sse），不含 /health。
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+
+    async def _health(_: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok"})
+
+    app.add_route("/health", _health)
+
     token = os.getenv("MCP_AUTH_TOKEN")
     if token:
         app = TokenAuthMiddleware(app, token)
         logger.info("HTTP 接口认证已启用（需携带 Authorization: Bearer <token>）")
     else:
-        logger.warning(
-            "MCP_AUTH_TOKEN 未设置，HTTP 接口处于无鉴权状态，"
-            "生产环境请务必配置该变量"
-        )
+        logger.warning("MCP_AUTH_TOKEN 未设置，HTTP 接口处于无鉴权状态，生产环境请务必配置该变量")
 
     log_level = os.getenv("MCP_LOG_LEVEL", "info").lower()
     logger.info(
         "MCP Server 启动：transport=%s, 监听 http://%s:%s%s",
-        transport, host, port, endpoint,
+        transport,
+        host,
+        port,
+        endpoint,
     )
     uvicorn.run(app, host=host, port=port, log_level=log_level)
 

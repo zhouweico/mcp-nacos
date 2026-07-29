@@ -23,18 +23,18 @@ from .base import NacosAuthBase
 class NacosClientV1(NacosAuthBase):
     """Nacos 1.x OpenAPI 客户端
 
-对接 Nacos 1.x Open API（https://nacos.io/docs/v1/open-api/）。
-路径前缀 /nacos/v1，运行在 API 端口（默认 8848）。
+    对接 Nacos 1.x Open API（https://nacos.io/docs/v1/open-api/）。
+    路径前缀 /nacos/v1，运行在 API 端口（默认 8848）。
 
-版本参数约定（与 2.x/3.x 不同）：
-- 命名空间用 tenant 字段（不是 namespaceId）
-- 创建命名空间用 customNamespaceId（不是 namespaceId）
-- 编辑命名空间用 namespace（不是 namespaceId）
-- 返回为裸值/字符串，无 {code,message,data} 信封（发布返回 "true" 表示成功）
+    版本参数约定（与 2.x/3.x 不同）：
+    - 命名空间用 tenant 字段（不是 namespaceId）
+    - 创建命名空间用 customNamespaceId（不是 namespaceId）
+    - 编辑命名空间用 namespace（不是 namespaceId）
+    - 返回为裸值/字符串，无 {code,message,data} 信封（发布返回 "true" 表示成功）
 
-覆盖接口：配置 get/publish/delete、配置历史 list/detail/previous、
-命名空间 list/get(模拟)/create/update/delete。
-"""
+    覆盖接口：配置 get/publish/delete、配置历史 list/detail/previous、
+    命名空间 list/get(模拟)/create/update/delete。
+    """
 
     # ---------------- 配置：获取 / 发布 / 删除 ----------------
     async def get_config(

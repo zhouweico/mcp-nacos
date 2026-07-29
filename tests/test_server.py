@@ -9,14 +9,24 @@ from mcp_nacos import server
 from mcp_nacos.server import ConfigType
 
 ALL_TOOLS = {
-    "nacos_get_config", "nacos_list_config_history", "nacos_get_config_history",
-    "nacos_get_config_previous", "nacos_list_namespaces", "nacos_get_namespace",
-    "nacos_publish_config", "nacos_delete_config", "nacos_create_namespace",
-    "nacos_update_namespace", "nacos_delete_namespace",
+    "nacos_get_config",
+    "nacos_list_config_history",
+    "nacos_get_config_history",
+    "nacos_get_config_previous",
+    "nacos_list_namespaces",
+    "nacos_get_namespace",
+    "nacos_publish_config",
+    "nacos_delete_config",
+    "nacos_create_namespace",
+    "nacos_update_namespace",
+    "nacos_delete_namespace",
 }
 WRITE_TOOLS = {
-    "nacos_publish_config", "nacos_delete_config", "nacos_create_namespace",
-    "nacos_update_namespace", "nacos_delete_namespace",
+    "nacos_publish_config",
+    "nacos_delete_config",
+    "nacos_create_namespace",
+    "nacos_update_namespace",
+    "nacos_delete_namespace",
 }
 READONLY_TOOLS = ALL_TOOLS - WRITE_TOOLS
 
@@ -40,10 +50,16 @@ def test_readonly_registers_only_read_tools():
 async def test_invoke_get_config(monkeypatch):
     fake = AsyncMock()
     fake.default_namespace = "public"
-    fake.get_config = AsyncMock(return_value={
-        "dataId": "app.yaml", "groupName": "DEFAULT_GROUP", "namespaceId": "public",
-        "content": "server:\n  port: 8080\n", "type": "yaml", "md5": "abc123",
-    })
+    fake.get_config = AsyncMock(
+        return_value={
+            "dataId": "app.yaml",
+            "groupName": "DEFAULT_GROUP",
+            "namespaceId": "public",
+            "content": "server:\n  port: 8080\n",
+            "type": "yaml",
+            "md5": "abc123",
+        }
+    )
     monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
 
     out = await server.nacos_get_config(data_id="app.yaml")
@@ -57,7 +73,8 @@ async def test_invoke_publish_config(monkeypatch):
     monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
 
     out = await server.nacos_publish_config(
-        data_id="app.yaml", content="foo: bar", config_type=ConfigType.YAML)
+        data_id="app.yaml", content="foo: bar", config_type=ConfigType.YAML
+    )
     assert "成功" in out
 
 

@@ -6,6 +6,22 @@ from typing import Any, Optional, Protocol
 
 import httpx
 
+NACOS_BASE_URL_ENV = "NACOS_BASE_URL"
+"""环境变量名，用于覆盖 Nacos 基础 URL（支持 HTTPS / 反向代理 / 上下文路径）。"""
+
+
+def _resolve_base_url(default_host: str, default_port: int) -> str:
+    """解析基础 URL（scheme://host[:port]，不含路径）。
+
+    若设置了 ``NACOS_BASE_URL``（如 ``https://nacos.example.com`` 或
+    ``https://nacos.example.com/nacos``），则优先使用它，以支持 HTTPS、
+    反向代理、带上下文路径等互联网部署；否则回退到 ``http://{host}:{port}``。
+    """
+    override = os.getenv(NACOS_BASE_URL_ENV)
+    if override:
+        return override.rstrip("/")
+    return f"http://{default_host}:{default_port}"
+
 
 class NacosClientProtocol(Protocol):
     """Nacos 客户端协议"""
@@ -99,8 +115,8 @@ class NacosAuthBase:
 
     @property
     def base_url(self) -> str:
-        """基础 URL"""
-        return f"http://{self.host}:{self.port}"
+        """基础 URL（支持 NACOS_BASE_URL 覆盖以支持 HTTPS / 反向代理）"""
+        return _resolve_base_url(self.host, self.port)
 
     @staticmethod
     def _unwrap(result: dict[str, Any]) -> Any:

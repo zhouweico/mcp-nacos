@@ -4,7 +4,8 @@
 （https://nacos.io/docs/v3.1/manual/admin/console-api/）。
 路径前缀 /v3/console/（默认 $nacos.console.contextPath 为空，即不带 /nacos；若部署配置了
 nacos.console.contextPath 则需加回前缀），运行在 console 端口（默认 8080）。
-鉴权：登录拿到 accessToken 后，请求头同时携带 accessToken 与 Authorization: Bearer（兼容 Nacos 3.x）。
+鉴权：登录拿到 accessToken 后，请求头同时携带 accessToken 与
+Authorization: Bearer（兼容 Nacos 3.x）。
 
 Nacos 3.x 有三类 HTTP API：
 - 客户端 API /v3/client/（端口 8848，仅 GET 配置，无发布）
@@ -33,6 +34,8 @@ from typing import Any, Optional
 
 import httpx
 
+from .base import _resolve_base_url
+
 
 class NacosClientV3:
     """Nacos 3.x Console API 客户端"""
@@ -50,13 +53,13 @@ class NacosClientV3:
 
     @property
     def api_base_url(self) -> str:
-        """API 端口 URL（用于登录）"""
-        return f"http://{self.host}:{self.api_port}"
+        """API 端口 URL（用于登录，支持 NACOS_BASE_URL 覆盖）"""
+        return _resolve_base_url(self.host, self.api_port)
 
     @property
     def console_base_url(self) -> str:
-        """Console 端口 URL（用于配置/命名空间操作）"""
-        return f"http://{self.host}:{self.console_port}"
+        """Console 端口 URL（用于配置/命名空间操作，支持 NACOS_BASE_URL 覆盖）"""
+        return _resolve_base_url(self.host, self.console_port)
 
     async def _ensure_token(self) -> Optional[str]:
         """确保有有效的 access token（如果需要认证）"""

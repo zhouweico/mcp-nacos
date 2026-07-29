@@ -160,6 +160,7 @@ Nacos 配置的组织层级为：**命名空间（namespace）> 分组（group�
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `NACOS_HOST` | Nacos 服务地址 | `localhost` |
+| `NACOS_BASE_URL` | **覆盖基础 URL**（如 `https://nacos.example.com` 或 `https://nacos.example.com/nacos`），用于 HTTPS / 反向代理 / 带上下文路径的互联网部署；设置后 `NACOS_HOST` / `NACOS_PORT` / `NACOS_API_PORT` / `NACOS_CONSOLE_PORT` 不再生效 | - |
 | `NACOS_PORT` | API 端口（仅 v1/v2 使用，v1/v2 必填） | `8848` |
 | `NACOS_API_PORT` | API 端口（用于登录，仅 v3 使用，v3 必填） | `8848` |
 | `NACOS_CONSOLE_PORT` | Console 端口（用于配置操作，仅 v3 使用，v3 必填） | `8080` |
