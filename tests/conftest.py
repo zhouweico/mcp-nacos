@@ -1,6 +1,6 @@
 """共享测试夹具：将 httpx.AsyncClient 重定向到 MockTransport。"""
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 

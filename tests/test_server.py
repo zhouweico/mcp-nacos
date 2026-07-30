@@ -5,6 +5,8 @@ import importlib
 import os
 from unittest.mock import AsyncMock
 
+from mcp.types import CallToolResult
+
 from mcp_nacos import server
 from mcp_nacos.server import ConfigType
 
@@ -29,6 +31,17 @@ WRITE_TOOLS = {
     "nacos_delete_namespace",
 }
 READONLY_TOOLS = ALL_TOOLS - WRITE_TOOLS
+
+
+def _result_text(result: object) -> str:
+    """从工具返回值中提取文本（兼容 str 和 CallToolResult）。"""
+    if isinstance(result, str):
+        return result
+    if isinstance(result, CallToolResult):
+        return "".join(
+            getattr(c, "text", "") for c in result.content if hasattr(c, "text")
+        )
+    return str(result)
 
 
 async def test_default_registers_all_tools():
@@ -63,7 +76,8 @@ async def test_invoke_get_config(monkeypatch):
     monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
 
     out = await server.nacos_get_config(data_id="app.yaml")
-    assert "server:" in out and "app.yaml" in out
+    text = _result_text(out)
+    assert "server:" in text and "app.yaml" in text
 
 
 async def test_invoke_publish_config(monkeypatch):
@@ -85,4 +99,5 @@ async def test_missing_config_returns_not_found(monkeypatch):
     monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
 
     out = await server.nacos_get_config(data_id="missing.yaml")
-    assert "不存在" in out
+    text = _result_text(out)
+    assert "不存在" in text

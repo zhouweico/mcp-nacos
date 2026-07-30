@@ -69,3 +69,9 @@ async def get_nacos_client() -> NacosClientProtocol:
     version = _get_configured_version() or "3"
     _cached_client = _build_client(version)
     return _cached_client
+
+
+def reset_nacos_client() -> None:
+    """重置客户端缓存。lifespan 关闭时调用，避免返回已关闭的客户端。"""
+    global _cached_client
+    _cached_client = None

@@ -13,9 +13,7 @@
 命名空间 list/get(模拟)/create/update/delete。
 """
 
-from typing import Any, Optional
-
-import httpx
+from typing import Any, Optional, cast
 
 from .base import NacosAuthBase
 
@@ -52,14 +50,14 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v1/cs/configs",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            content = response.text
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v1/cs/configs",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        content = response.text
 
         return {
             "dataId": data_id,
@@ -97,15 +95,15 @@ class NacosClientV1(NacosAuthBase):
         if desc:
             data["desc"] = desc
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/nacos/v1/cs/configs",
-                params=params,
-                data=data,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result = response.text.strip().lower()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.base_url}/nacos/v1/cs/configs",
+            params=params,
+            data=data,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result = response.text.strip().lower()
 
         return result == "true"
 
@@ -124,14 +122,14 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.base_url}/nacos/v1/cs/configs",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result = response.text.strip().lower()
+        client = await self._get_client()
+        response = await client.delete(
+            f"{self.base_url}/nacos/v1/cs/configs",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result = response.text.strip().lower()
 
         return result == "true"
 
@@ -159,14 +157,18 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v1/cs/history",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v1/cs/history",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        payload = data.get("data", data) if isinstance(data, dict) else data
+        if not isinstance(payload, dict):
+            raise TypeError(f"Expected dict, got {type(payload).__name__}")
+        return cast(dict[str, Any], payload)
 
     async def get_config_history(
         self,
@@ -184,14 +186,17 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v1/cs/history",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v1/cs/history",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def get_config_previous(
         self,
@@ -209,14 +214,17 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v1/cs/history/previous",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v1/cs/history/previous",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     # ---------------- 命名空间 ----------------
     async def list_namespaces(self) -> list[dict[str, Any]]:
@@ -225,15 +233,15 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v1/console/namespaces",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-        return data.get("data", [])
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v1/console/namespaces",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return cast(list[dict[str, Any]], data.get("data", []))
 
     async def get_namespace(self, namespace_id: str) -> dict[str, Any]:
         # 1.x 没有"查询单个命名空间"接口，用列表过滤模拟
@@ -261,15 +269,15 @@ class NacosClientV1(NacosAuthBase):
         if namespace_desc:
             data["namespaceDesc"] = namespace_desc
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/nacos/v1/console/namespaces",
-                params=params,
-                data=data,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result = response.text.strip().lower()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.base_url}/nacos/v1/console/namespaces",
+            params=params,
+            data=data,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result = response.text.strip().lower()
 
         return result == "true"
 
@@ -291,15 +299,15 @@ class NacosClientV1(NacosAuthBase):
             "namespaceDesc": namespace_desc or "",
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                f"{self.base_url}/nacos/v1/console/namespaces",
-                params=params,
-                data=data,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result = response.text.strip().lower()
+        client = await self._get_client()
+        response = await client.put(
+            f"{self.base_url}/nacos/v1/console/namespaces",
+            params=params,
+            data=data,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result = response.text.strip().lower()
 
         return result == "true"
 
@@ -309,13 +317,13 @@ class NacosClientV1(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.base_url}/nacos/v1/console/namespaces",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result = response.text.strip().lower()
+        client = await self._get_client()
+        response = await client.delete(
+            f"{self.base_url}/nacos/v1/console/namespaces",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result = response.text.strip().lower()
 
         return result == "true"

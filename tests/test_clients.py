@@ -10,7 +10,7 @@
 import urllib.parse
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 from mcp_nacos.clients.v1 import NacosClientV1

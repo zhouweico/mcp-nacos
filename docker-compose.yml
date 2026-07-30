@@ -14,6 +14,7 @@ services:
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8000"
       MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"                # 设置后启用 Bearer Token 认证
+      MCP_STATELESS_HTTP: "${MCP_STATELESS_HTTP:-false}"   # true 时启用 Stateless HTTP 模式（无会话状态）
       MCP_LOG_LEVEL: "${MCP_LOG_LEVEL:-info}"
       # ---- Nacos 连接配置 ----
       # 若 Nacos 部署在 HTTPS / 反向代理 / 带上下文路径（如 https://nacos.example.com/nacos），

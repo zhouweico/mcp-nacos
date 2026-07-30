@@ -12,9 +12,7 @@
 命名空间 list/get/create/update/delete。
 """
 
-from typing import Any, Optional
-
-import httpx
+from typing import Any, Optional, cast
 
 from .base import NacosAuthBase
 
@@ -50,14 +48,14 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v2/cs/config",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v2/cs/config",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         if result.get("code") != 0:
             raise Exception(result.get("message", "Unknown error"))
@@ -99,15 +97,15 @@ class NacosClientV2(NacosAuthBase):
         if desc:
             data["desc"] = desc
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/nacos/v2/cs/config",
-                params=params,
-                data=data,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.base_url}/nacos/v2/cs/config",
+            params=params,
+            data=data,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         if result.get("code") != 0:
             raise Exception(result.get("message", "Unknown error"))
@@ -129,14 +127,14 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.base_url}/nacos/v2/cs/config",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.delete(
+            f"{self.base_url}/nacos/v2/cs/config",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         return bool(self._unwrap(result))
 
@@ -163,16 +161,19 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v2/cs/history/list",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v2/cs/history/list",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
-        return self._unwrap(result)
+        data = self._unwrap(result)
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def get_config_history(
         self,
@@ -190,16 +191,19 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v2/cs/history",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v2/cs/history",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
-        return self._unwrap(result)
+        data = self._unwrap(result)
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def get_config_previous(
         self,
@@ -217,16 +221,19 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v2/cs/history/previous",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v2/cs/history/previous",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
-        return self._unwrap(result)
+        data = self._unwrap(result)
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     # ---------------- 命名空间 ----------------
     async def list_namespaces(self) -> list[dict[str, Any]]:
@@ -235,16 +242,16 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v2/console/namespace/list",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v2/console/namespace/list",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
-        return self._unwrap(result)
+        return cast(list[dict[str, Any]], self._unwrap(result))
 
     async def get_namespace(self, namespace_id: str) -> dict[str, Any]:
         token = await self._ensure_token()
@@ -252,16 +259,19 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/nacos/v2/console/namespace",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/nacos/v2/console/namespace",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
-        return self._unwrap(result)
+        data = self._unwrap(result)
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def create_namespace(
         self,
@@ -281,15 +291,15 @@ class NacosClientV2(NacosAuthBase):
         if namespace_desc:
             data["namespaceDesc"] = namespace_desc
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/nacos/v2/console/namespace",
-                params=params,
-                data=data,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.base_url}/nacos/v2/console/namespace",
+            params=params,
+            data=data,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         return bool(self._unwrap(result))
 
@@ -311,15 +321,15 @@ class NacosClientV2(NacosAuthBase):
         if namespace_desc:
             data["namespaceDesc"] = namespace_desc
 
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                f"{self.base_url}/nacos/v2/console/namespace",
-                params=params,
-                data=data,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.put(
+            f"{self.base_url}/nacos/v2/console/namespace",
+            params=params,
+            data=data,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         return bool(self._unwrap(result))
 
@@ -329,13 +339,13 @@ class NacosClientV2(NacosAuthBase):
         if token:
             params["accessToken"] = token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.base_url}/nacos/v2/console/namespace",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.delete(
+            f"{self.base_url}/nacos/v2/console/namespace",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         return bool(self._unwrap(result))

@@ -30,9 +30,9 @@ Nacos 3.x 有三类 HTTP API：
 
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
-import httpx
+import httpx2 as httpx
 
 from .base import _resolve_base_url
 
@@ -47,6 +47,8 @@ class NacosClientV3:
         self.username = os.getenv("NACOS_USERNAME")
         self.password = os.getenv("NACOS_PASSWORD")
         self.default_namespace = os.getenv("NACOS_NAMESPACE", "public")
+        self._verify = os.getenv("NACOS_INSECURE", "false").lower() != "true"
+        self._client: Optional[httpx.AsyncClient] = None
 
         self._access_token: Optional[str] = None
         self._token_expire_time: Optional[float] = None
@@ -70,14 +72,14 @@ class NacosClientV3:
             if time.time() < self._token_expire_time - 300:
                 return self._access_token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.api_base_url}/nacos/v3/auth/user/login",
-                data={"username": self.username, "password": self.password},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.api_base_url}/nacos/v3/auth/user/login",
+            data={"username": self.username, "password": self.password},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         self._access_token = data.get("accessToken")
         ttl = int(data.get("tokenTtl", 18000))
@@ -109,6 +111,18 @@ class NacosClientV3:
             raise Exception(result.get("message", "Unknown error"))
         return result.get("data")
 
+    async def _get_client(self) -> httpx.AsyncClient:
+        """获取共享 AsyncClient（惰性创建，复用连接池）。"""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(verify=self._verify)
+        return self._client
+
+    async def aclose(self) -> None:
+        """关闭共享 AsyncClient，释放连接池。"""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+
     # ---------------- 配置：获取 / 发布 / 删除 ----------------
     async def get_config(
         self,
@@ -126,15 +140,15 @@ class NacosClientV3:
         }
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.console_base_url}/v3/console/cs/config",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.console_base_url}/v3/console/cs/config",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         if result.get("code") != 0:
             raise Exception(result.get("message", "Unknown error"))
@@ -166,15 +180,15 @@ class NacosClientV3:
 
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.console_base_url}/v3/console/cs/config",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.console_base_url}/v3/console/cs/config",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
         if result.get("code") != 0:
             raise Exception(result.get("message", "Unknown error"))
@@ -197,15 +211,15 @@ class NacosClientV3:
         }
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.console_base_url}/v3/console/cs/config",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return bool(self._unwrap(response.json()))
+        client = await self._get_client()
+        response = await client.delete(
+            f"{self.console_base_url}/v3/console/cs/config",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return bool(self._unwrap(response.json()))
 
     # ---------------- 配置历史（Console API 2.14 / 2.15 / 2.16）----------------
     async def list_config_history(
@@ -227,15 +241,18 @@ class NacosClientV3:
         }
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.console_base_url}/v3/console/cs/history/list",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return self._unwrap(response.json())
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.console_base_url}/v3/console/cs/history/list",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = self._unwrap(response.json())
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def get_config_history(
         self,
@@ -254,15 +271,18 @@ class NacosClientV3:
         }
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.console_base_url}/v3/console/cs/history",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return self._unwrap(response.json())
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.console_base_url}/v3/console/cs/history",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = self._unwrap(response.json())
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def get_config_previous(
         self,
@@ -281,44 +301,50 @@ class NacosClientV3:
         }
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.console_base_url}/v3/console/cs/history/previous",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return self._unwrap(response.json())
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.console_base_url}/v3/console/cs/history/previous",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = self._unwrap(response.json())
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     # ---------------- 命名空间（Console API 路径含 /core/ 段）----------------
     async def list_namespaces(self) -> list[dict[str, Any]]:
         await self._ensure_token()
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.console_base_url}/v3/console/core/namespace/list",
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return self._unwrap(response.json())
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.console_base_url}/v3/console/core/namespace/list",
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return cast(list[dict[str, Any]], self._unwrap(response.json()))
 
     async def get_namespace(self, namespace_id: str) -> dict[str, Any]:
         await self._ensure_token()
         params: dict[str, str] = {"namespaceId": namespace_id}
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.console_base_url}/v3/console/core/namespace",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return self._unwrap(response.json())
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.console_base_url}/v3/console/core/namespace",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = self._unwrap(response.json())
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        return cast(dict[str, Any], data)
 
     async def create_namespace(
         self,
@@ -335,15 +361,15 @@ class NacosClientV3:
         }
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.console_base_url}/v3/console/core/namespace",
-                data=data,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return bool(self._unwrap(response.json()))
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.console_base_url}/v3/console/core/namespace",
+            data=data,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return bool(self._unwrap(response.json()))
 
     async def update_namespace(
         self,
@@ -360,27 +386,27 @@ class NacosClientV3:
             data["namespaceDesc"] = namespace_desc
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                f"{self.console_base_url}/v3/console/core/namespace",
-                data=data,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return bool(self._unwrap(response.json()))
+        client = await self._get_client()
+        response = await client.put(
+            f"{self.console_base_url}/v3/console/core/namespace",
+            data=data,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return bool(self._unwrap(response.json()))
 
     async def delete_namespace(self, namespace_id: str) -> bool:
         await self._ensure_token()
         params: dict[str, str] = {"namespaceId": namespace_id}
         headers: dict[str, str] = await self._auth_headers()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.console_base_url}/v3/console/core/namespace",
-                params=params,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return bool(self._unwrap(response.json()))
+        client = await self._get_client()
+        response = await client.delete(
+            f"{self.console_base_url}/v3/console/core/namespace",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return bool(self._unwrap(response.json()))

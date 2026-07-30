@@ -1,10 +1,13 @@
 """Nacos 客户端基础实现"""
 
+import logging
 import os
 import time
 from typing import Any, Optional, Protocol
 
-import httpx
+import httpx2 as httpx
+
+logger = logging.getLogger(__name__)
 
 NACOS_BASE_URL_ENV = "NACOS_BASE_URL"
 """环境变量名，用于覆盖 Nacos 基础 URL（支持 HTTPS / 反向代理 / 上下文路径）。"""
@@ -110,6 +113,10 @@ class NacosAuthBase:
         self.default_namespace = default_namespace
         self.username = os.getenv("NACOS_USERNAME")
         self.password = os.getenv("NACOS_PASSWORD")
+        self._verify = os.getenv("NACOS_INSECURE", "false").lower() != "true"
+        self._client: Optional[httpx.AsyncClient] = None
+        if not self._verify:
+            logger.warning("NACOS_INSECURE=true 已禁用 TLS 证书验证，存在中间人攻击风险，请仅用于开发/测试环境")
         self._access_token: Optional[str] = None
         self._token_expire_time: Optional[float] = None
 
@@ -134,14 +141,14 @@ class NacosAuthBase:
             if time.time() < self._token_expire_time - 300:
                 return self._access_token
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/nacos/v1/auth/login",
-                data={"username": self.username, "password": self.password},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = await self._get_client()
+        response = await client.post(
+            f"{self.base_url}/nacos/v1/auth/login",
+            data={"username": self.username, "password": self.password},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         self._access_token = data.get("accessToken")
         ttl = int(data.get("tokenTtl", 18000))
@@ -151,3 +158,15 @@ class NacosAuthBase:
     def _get_namespace(self, namespace_id: Optional[str]) -> str:
         """获取命名空间 ID"""
         return namespace_id or self.default_namespace
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """获取共享 AsyncClient（惰性创建，复用连接池）。"""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(verify=self._verify)
+        return self._client
+
+    async def aclose(self) -> None:
+        """关闭共享 AsyncClient，释放连接池。"""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
