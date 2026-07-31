@@ -409,8 +409,9 @@ class NacosClientV3:
         namespace_desc: Optional[str] = None,
     ) -> bool:
         await self._ensure_token()
+        ns = self._get_namespace(namespace_id)  # public -> "" 归一化
         data: dict[str, str] = {
-            "namespaceId": namespace_id,
+            "namespaceId": ns,
             "namespaceName": namespace_name,
         }
         if namespace_desc is not None:
@@ -429,7 +430,8 @@ class NacosClientV3:
 
     async def delete_namespace(self, namespace_id: str) -> bool:
         await self._ensure_token()
-        params: dict[str, str] = {"namespaceId": namespace_id}
+        ns = self._get_namespace(namespace_id)  # public -> "" 归一化
+        params: dict[str, str] = {"namespaceId": ns}
         headers: dict[str, str] = await self._auth_headers()
 
         client = await self._get_client()

@@ -5,6 +5,10 @@
 - 命名空间参数键正确（v1 用 tenant / customNamespaceId / namespace，v2 用 namespaceId，
   v3 创建用 customNamespaceId、其余用 namespaceId）
 - 返回值类型正确（裸值 vs {code,message,data} 信封）
+
+注：`request.url.params` 是 httpx 的 `QueryParams` 而非 `dict`；
+`dict(params)` 取值时所有 value 会被规范化为 `str`（即使原始 query 看起来像数字）。
+下方 `p["pageNo"] == "2"` 等断言依赖这一行为——若 httpx 行为变更需重新评估。
 """
 
 import urllib.parse
@@ -376,7 +380,10 @@ async def test_client_routing(version, method, http_mock):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("version", ["v1", "v2", "v3"])
 async def test_list_configs_shape(version, http_mock):
+    captured: dict[str, Any] = {}
+
     def handler(request: httpx.Request) -> httpx.Response:
+        captured["params"] = dict(request.url.params)
         return HANDLERS[version](request)
 
     http_mock(handler)
@@ -389,6 +396,7 @@ async def test_list_configs_shape(version, http_mock):
     assert isinstance(result["configs"], list) and result["configs"], f"[{version}] configs 应为非空列表"
     first = result["configs"][0]
     assert "data_id" in first and "group_name" in first, f"[{version}] 元素应含 data_id/group_name，实际 {first}"
+    assert captured["params"].get("search") == "blur", f"[{version}] search=blur 应被默认下发，实际 {captured['params']}"
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +460,14 @@ async def test_v3_list_configs_forwards_filters(http_mock):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "raw,expected",
-    [("public", ""), ("PUBLIC", ""), ("Public", ""), ("", ""), (None, ""), ("dev", "dev"), ("prod", "prod")],
+    [
+        ("public", ""),
+        ("PUBLIC", ""),
+        ("Public", ""),
+        (None, ""),
+        ("dev", "dev"),
+        ("prod", "prod"),
+    ],
 )
 def test_normalize_namespace(raw, expected):
     from mcp_nacos.clients.base import normalize_namespace
@@ -478,9 +493,18 @@ async def test_public_normalized_on_wire(version, http_mock):
     client = CLIENTS[version]()
     # get_config 三版本均带 namespace 参数（v1=tenant / v2,v3=namespaceId）
     await client.get_config(data_id="app.yaml", group_name="DEFAULT_GROUP", namespace_id="public")
-
     key = "tenant" if version == "v1" else "namespaceId"
     val = captured["params"].get(key)
     # 归一化后 namespace 应表示 public：空串下发（v3）或省略该参数（v1/v2 的 `if ns:`），
     # 二者对服务端都等价于 public；关键是绝不能是字面量 "public"。
-    assert val in (None, ""), f"[{version}] public 应归一化为空串/省略，实际 {key}={val!r}"
+    assert val in (None, ""), f"[{version}.get_config] public 应归一化为空串/省略，实际 {key}={val!r}"
+
+    captured["params"] = {}
+    await client.list_configs(namespace_id="public")
+    val = captured["params"].get(key)
+    assert val in (None, ""), f"[{version}.list_configs] public 应归一化为空串/省略，实际 {key}={val!r}"
+
+    captured["params"] = {}
+    await client.delete_namespace(namespace_id="public")
+    val = captured["params"].get(key)
+    assert val in (None, ""), f"[{version}.delete_namespace] public 应归一化为空串/省略，实际 {key}={val!r}"

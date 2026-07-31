@@ -20,6 +20,10 @@ def http_mock(monkeypatch):
     real_async_client = httpx.AsyncClient
 
     def _factory(*args, **kwargs):
+        if holder["handler"] is None:
+            raise RuntimeError(
+                "http_mock: handler not set. Call `set_handler(fn)` before using the client."
+            )
         kwargs["transport"] = httpx.MockTransport(holder["handler"])
         return real_async_client(*args, **kwargs)
 

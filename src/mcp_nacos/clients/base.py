@@ -10,10 +10,6 @@ import httpx2 as httpx
 logger = logging.getLogger(__name__)
 
 
-class UnsupportedVersionError(Exception):
-    """当前 Nacos 版本不支持该操作。"""
-
-
 def resolve_base_url() -> str:
     """读取 `NACOS_BASE_URL`（唯一地址来源），未设置抛出 RuntimeError。
 
@@ -108,7 +104,7 @@ class NacosClientProtocol(Protocol):
         search: str = "blur",
         page_no: int = 1,
         page_size: int = 100,
-    ) -> Any: ...
+    ) -> dict[str, Any]: ...
 
     # ---- 命名空间 ----
     async def list_namespaces(self) -> Any: ...

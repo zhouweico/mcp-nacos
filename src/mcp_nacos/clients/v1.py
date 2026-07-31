@@ -34,6 +34,9 @@ class NacosClientV1(NacosAuthBase):
     命名空间 list/get(模拟)/create/update/delete。
     """
 
+    def __init__(self, default_namespace: Optional[str] = None) -> None:
+        super().__init__(default_namespace=default_namespace)
+
     # ---------------- 配置：获取 / 发布 / 删除 ----------------
     async def get_config(
         self,
@@ -251,10 +254,11 @@ class NacosClientV1(NacosAuthBase):
             "group": group_name or "",
             "appName": app_name or "",
             "config_tags": config_tags or "",
-            "tenant": ns,
             "pageNo": page_no,
             "pageSize": page_size,
         }
+        if ns:
+            params["tenant"] = ns
         if token:
             params["accessToken"] = token
 
@@ -345,13 +349,14 @@ class NacosClientV1(NacosAuthBase):
         namespace_desc: Optional[str] = None,
     ) -> bool:
         token = await self._ensure_token()
+        ns = self._get_namespace(namespace_id)  # public -> "" 归一化
         params: dict[str, str] = {}
         if token:
             params["accessToken"] = token
 
         # 1.x 编辑接口参数：namespace(命名空间ID) / namespaceShowName / namespaceDesc(必填)
         data: dict[str, str] = {
-            "namespace": namespace_id,
+            "namespace": ns,
             "namespaceShowName": namespace_name,
             "namespaceDesc": namespace_desc or "",
         }
@@ -370,7 +375,8 @@ class NacosClientV1(NacosAuthBase):
 
     async def delete_namespace(self, namespace_id: str) -> bool:
         token = await self._ensure_token()
-        params: dict[str, str] = {"namespaceId": namespace_id}
+        ns = self._get_namespace(namespace_id)  # public -> "" 归一化
+        params: dict[str, str] = {"namespaceId": ns}
         if token:
             params["accessToken"] = token
 

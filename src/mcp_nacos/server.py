@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import TokenAuthMiddleware
 from .client import get_nacos_client, reset_nacos_client
-from .clients.base import UnsupportedVersionError
 
 logger = logging.getLogger(__name__)
 
@@ -216,8 +215,7 @@ async def _confirm_action(ctx: Optional[Context], action_desc: str) -> tuple[boo
 
 
 def handle_error(e: Exception) -> str:
-    if isinstance(e, UnsupportedVersionError):
-        return str(e)
+    """统一错误处理：转换为中文可读提示，不抛栈。"""
     if isinstance(e, httpx.HTTPStatusError):
         status = e.response.status_code
         if status in (401, 403, 404):
@@ -266,7 +264,7 @@ async def nacos_get_config(
         ResponseFormat, Field(description="输出格式：markdown 或 json")
     ] = ResponseFormat.MARKDOWN,
 ) -> Annotated[CallToolResult, GetConfigOutput]:
-    """获取 Nacos 配置内容（2.1，只读）。
+    """获取 Nacos 配置内容。
 
     对应 Nacos OpenAPI：
     - v1：GET /nacos/v1/cs/configs（参数 tenant）
@@ -354,7 +352,7 @@ async def nacos_list_config_history(
     page_no: Annotated[int, Field(description="页码，默认 1", ge=1)] = 1,
     page_size: Annotated[int, Field(description="每页条数，默认 100", ge=1, le=500)] = 100,
 ) -> Annotated[CallToolResult, ListConfigHistoryOutput]:
-    """查询配置历史版本列表（2.14，只读）。
+    """查询配置历史版本列表。
 
     对应 Nacos OpenAPI：
     - v1：GET /nacos/v1/cs/history
@@ -397,7 +395,7 @@ async def nacos_get_config_history(
     ] = "DEFAULT_GROUP",
     namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
 ) -> Annotated[CallToolResult, GetConfigHistoryOutput]:
-    """查询某次历史变更记录（2.15，只读）。
+    """查询某次历史变更记录。
 
     对应 Nacos OpenAPI：
     - v1：GET /nacos/v1/cs/history
@@ -439,7 +437,7 @@ async def nacos_get_config_previous(
     ] = "DEFAULT_GROUP",
     namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
 ) -> Annotated[CallToolResult, GetConfigPreviousOutput]:
-    """查询配置最新状态的前一次变更历史（2.16，只读）。
+    """查询配置最新状态的前一次变更历史。
 
     对应 Nacos OpenAPI：
     - v1：GET /nacos/v1/cs/history/previous
@@ -474,7 +472,7 @@ async def nacos_get_config_previous(
     structured_output=True,
 )
 async def nacos_list_namespaces() -> Annotated[CallToolResult, ListNamespacesOutput]:
-    """查询命名空间列表（1.7，只读）。
+    """查询命名空间列表。
 
     对应 Nacos OpenAPI：
     - v1：GET /nacos/v1/console/namespaces
@@ -515,12 +513,12 @@ async def nacos_get_namespace(
         ),
     ],
 ) -> Annotated[CallToolResult, GetNamespaceOutput]:
-    """查询单个命名空间详情（1.8，只读）。
+    """查询单个命名空间详情。
 
     对应 Nacos OpenAPI：
     - v1：官方无单查接口，由命名空间列表过滤模拟
-    - v2：GET /nacos/v2/console/namespace
-    - v3：GET /v3/console/core/namespace（Console API）
+    - v2：GET {base_url}/v2/console/namespace
+    - v3：GET {base_url}/v3/console/core/namespace（Console API）
 
     按 namespace_id 返回该命名空间的配额、使用量等详情。public 命名空间已自动归一化
     （传 'public' 或空串都可查到，底层统一用空串 ""，三版本行为一致）。
@@ -584,7 +582,7 @@ async def nacos_list_configs(
         Field(description="每页条数（默认 100）"),
     ] = 100,
 ) -> Annotated[CallToolResult, ListConfigsOutput]:
-    """查询命名空间下的配置列表（只读）。
+    """查询命名空间下的配置列表。
 
     对应 Nacos OpenAPI：
     - v1 / v2：GET /nacos/v1/cs/configs?search=blur（搜索配置接口，Nacos 1.x/2.x 服务端均支持）
