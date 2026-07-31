@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 (2026-07-31)
+
+### 修复
+
+- 写操作 namespace 归一化：`update_namespace` / `delete_namespace`（v1/v2/v3）改走 `_get_namespace`，与 `get_namespace` 一致；传 `"public"` 在 v1/v2 不再因服务端 public id 为空串而失败。
+- `list_configs` 参数守卫：v1/v2 改为 `if ns: params["tenant"] = ns`，与同文件 `get_config` 风格一致。
+- 死代码清理：移除 `UnsupportedVersionError`（无任何 raise 点）及 `handle_error` 中对应特判。
+
+### 文档
+
+- README 标注 `NACOS_BASE_URL` 在 docker compose 启动时为必填。
+- 工具 docstring 移除冗余的「只读」「读写」后缀（已通过 MCP `readOnlyHint` 暴露）。
+
 ## 0.5.0 (2026-07-31)
 
 ### 新增

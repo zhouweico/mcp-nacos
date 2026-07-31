@@ -79,6 +79,8 @@ Cursor / OpenCode / Claude Desktop 等客户端格式相同：`command: uvx` + `
 
 **方式二：HTTP + 认证（容器独立运行）**
 
+> 容器启动时会校验 `NACOS_BASE_URL`（缺失则 `${VAR:?...}` 报错退出），必须显式传入。
+
 启动容器：
 
 ```bash
