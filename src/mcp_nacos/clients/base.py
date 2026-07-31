@@ -9,21 +9,37 @@ import httpx2 as httpx
 
 logger = logging.getLogger(__name__)
 
-NACOS_BASE_URL_ENV = "NACOS_BASE_URL"
-"""环境变量名，用于覆盖 Nacos 基础 URL（支持 HTTPS / 反向代理 / 上下文路径）。"""
+
+class UnsupportedVersionError(Exception):
+    """当前 Nacos 版本不支持该操作。"""
 
 
-def _resolve_base_url(default_host: str, default_port: int) -> str:
-    """解析基础 URL（scheme://host[:port]，不含路径）。
+def resolve_base_url() -> str:
+    """读取 `NACOS_BASE_URL`（唯一地址来源），未设置抛出 RuntimeError。
 
-    若设置了 ``NACOS_BASE_URL``（如 ``https://nacos.example.com`` 或
-    ``https://nacos.example.com/nacos``），则优先使用它，以支持 HTTPS、
-    反向代理、带上下文路径等互联网部署；否则回退到 ``http://{host}:{port}``。
+    格式 `scheme://host[:port][/context-path]`。上下文路径（如 ``/nacos``）由部署决定，
+    本函数不拼接；各版本客户端仅在其后追加版本 API 段。
     """
-    override = os.getenv(NACOS_BASE_URL_ENV)
-    if override:
-        return override.rstrip("/")
-    return f"http://{default_host}:{default_port}"
+    value = os.getenv("NACOS_BASE_URL")
+    if not value:
+        raise RuntimeError(
+            "环境变量 NACOS_BASE_URL 未设置。"
+            "格式 scheme://host[:port][/context-path]，"
+            "1.x/2.x 默认部署带 /nacos，3.x 默认无；经反向代理时把代理前缀加在地址里。"
+        )
+    return value.rstrip("/")
+
+
+# public 命名空间：2.x 以空串表示、3.x 以 "public" 字面量表示；
+# 空串在三版本、所有操作中均通过，统一归一化为空串。
+_PUBLIC_ALIASES = {"public", "PUBLIC", "Public"}
+
+
+def normalize_namespace(namespace_id: Optional[str]) -> str:
+    """将 public 别名 / None 归一为空串 ""，其余原样返回。"""
+    if namespace_id is None:
+        return ""
+    return "" if namespace_id in _PUBLIC_ALIASES else namespace_id
 
 
 class NacosClientProtocol(Protocol):
@@ -82,6 +98,18 @@ class NacosClientProtocol(Protocol):
         namespace_id: Optional[str] = None,
     ) -> Any: ...
 
+    async def list_configs(
+        self,
+        namespace_id: Optional[str] = None,
+        data_id: Optional[str] = None,
+        group_name: Optional[str] = None,
+        app_name: Optional[str] = None,
+        config_tags: Optional[str] = None,
+        search: str = "blur",
+        page_no: int = 1,
+        page_size: int = 100,
+    ) -> Any: ...
+
     # ---- 命名空间 ----
     async def list_namespaces(self) -> Any: ...
 
@@ -105,59 +133,53 @@ class NacosClientProtocol(Protocol):
 
 
 class NacosAuthBase:
-    """1.x/2.x 共用的鉴权基类"""
+    """1.x/2.x 共用的鉴权与 HTTP 基类"""
 
-    def __init__(self, host: str, port: int, default_namespace: str) -> None:
-        self.host = host
-        self.port = port
-        self.default_namespace = default_namespace
+    def __init__(self, default_namespace: Optional[str] = None) -> None:
+        self.default_namespace = default_namespace if default_namespace is not None else os.getenv(
+            "NACOS_NAMESPACE", "public"
+        )
         self.username = os.getenv("NACOS_USERNAME")
         self.password = os.getenv("NACOS_PASSWORD")
         self._verify = os.getenv("NACOS_INSECURE", "false").lower() != "true"
         self._client: Optional[httpx.AsyncClient] = None
         if not self._verify:
-            logger.warning("NACOS_INSECURE=true 已禁用 TLS 证书验证，存在中间人攻击风险，请仅用于开发/测试环境")
+            logger.warning("NACOS_INSECURE=true 已禁用 TLS 证书验证，请仅用于开发/测试")
         self._access_token: Optional[str] = None
         self._token_expire_time: Optional[float] = None
 
     @property
     def base_url(self) -> str:
-        """基础 URL（支持 NACOS_BASE_URL 覆盖以支持 HTTPS / 反向代理）"""
-        return _resolve_base_url(self.host, self.port)
+        return resolve_base_url()
 
     @staticmethod
     def _unwrap(result: dict[str, Any]) -> Any:
-        """校验 2.x 风格信封返回 {code, message, data} 并取出 data"""
+        """2.x 信封 {code, message, data}，取出 data"""
         if result.get("code") != 0:
             raise Exception(result.get("message", "Unknown error"))
         return result.get("data")
 
     async def _ensure_token(self) -> Optional[str]:
-        """确保有有效的 access token（如果需要认证）"""
+        """惰性获取并缓存 access token（tokenTtl 前 5min 刷新）。"""
         if not self.username or not self.password:
             return None
-
-        if self._access_token and self._token_expire_time:
-            if time.time() < self._token_expire_time - 300:
-                return self._access_token
-
+        if self._access_token and self._token_expire_time and time.time() < self._token_expire_time - 300:
+            return self._access_token
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/nacos/v1/auth/login",
+            f"{self.base_url}/v1/auth/login",
             data={"username": self.username, "password": self.password},
             timeout=30.0,
         )
         response.raise_for_status()
         data = response.json()
-
         self._access_token = data.get("accessToken")
         ttl = int(data.get("tokenTtl", 18000))
         self._token_expire_time = time.time() + ttl
         return self._access_token
 
     def _get_namespace(self, namespace_id: Optional[str]) -> str:
-        """获取命名空间 ID"""
-        return namespace_id or self.default_namespace
+        return normalize_namespace(namespace_id or self.default_namespace)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取共享 AsyncClient（惰性创建，复用连接池）。"""

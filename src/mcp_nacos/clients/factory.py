@@ -34,26 +34,17 @@ def _get_configured_version() -> Optional[str]:
     return normalized
 
 
-def _get_host() -> str:
-    return os.getenv("NACOS_HOST", "localhost")
-
-
 def _get_default_namespace() -> str:
     return os.getenv("NACOS_NAMESPACE", "public")
 
 
-def _get_legacy_port() -> int:
-    return int(os.getenv("NACOS_PORT", os.getenv("NACOS_API_PORT", "8848")))
-
-
 def _build_client(version: str) -> NacosClientProtocol:
-    host = _get_host()
     default_namespace = _get_default_namespace()
 
     if version == "1":
-        return NacosClientV1(host, _get_legacy_port(), default_namespace)
+        return NacosClientV1(default_namespace)
     if version == "2":
-        return NacosClientV2(host, _get_legacy_port(), default_namespace)
+        return NacosClientV2(default_namespace)
     if version == "3":
         return NacosClientV3()
 

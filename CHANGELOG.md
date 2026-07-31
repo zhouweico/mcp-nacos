@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 (2026-07-31)
+
+### 新增
+
+- **`nacos_list_configs` 工具**：查询命名空间下配置列表，返回 `{total, configs[]}`。v1/v2 走 `GET /v1/cs/configs?search=blur`，v3 走 `GET /v3/console/cs/config/list`，均支持过滤与分页。
+
+### 变更
+
+- **地址参数收敛为 `NACOS_BASE_URL`**：移除 `NACOS_HOST` / `NACOS_PORT` / `NACOS_API_PORT` / `NACOS_CONSOLE_PORT`，未设置时直接抛 `RuntimeError`。
+- **路径前缀调整**：客户端不再写死 `/nacos` contextPath，由 `NACOS_BASE_URL` 统一承载；v3 合并 `api_base_url` / `console_base_url` 为单一 `base_url`。
+- **public 命名空间归一化**：新增 `normalize_namespace`，`public` / `None` 等统一映射为空串。
+- **`NacosAuthBase` 签名简化**：移除 `host` / `port` 入参。
+
+### 文档
+
+- README 新增「使用示例」章节。
+- 3.x 默认端口由 `8848` 修正为 `8080`。
+- `.env.example` / `docker-compose.yml` 清理废弃环境变量，`NACOS_BASE_URL` 标注为必填。
+
 ## 0.4.0 (2026-07-30)
 
 ### 新增

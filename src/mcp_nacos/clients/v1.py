@@ -52,7 +52,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.base_url}/nacos/v1/cs/configs",
+            f"{self.base_url}/v1/cs/configs",
             params=params,
             timeout=30.0,
         )
@@ -97,7 +97,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/nacos/v1/cs/configs",
+            f"{self.base_url}/v1/cs/configs",
             params=params,
             data=data,
             timeout=30.0,
@@ -124,7 +124,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.delete(
-            f"{self.base_url}/nacos/v1/cs/configs",
+            f"{self.base_url}/v1/cs/configs",
             params=params,
             timeout=30.0,
         )
@@ -159,7 +159,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.base_url}/nacos/v1/cs/history",
+            f"{self.base_url}/v1/cs/history",
             params=params,
             timeout=30.0,
         )
@@ -188,7 +188,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.base_url}/nacos/v1/cs/history",
+            f"{self.base_url}/v1/cs/history",
             params=params,
             timeout=30.0,
         )
@@ -216,7 +216,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.base_url}/nacos/v1/cs/history/previous",
+            f"{self.base_url}/v1/cs/history/previous",
             params=params,
             timeout=30.0,
         )
@@ -225,6 +225,62 @@ class NacosClientV1(NacosAuthBase):
         if not isinstance(data, dict):
             raise TypeError(f"Expected dict, got {type(data).__name__}")
         return cast(dict[str, Any], data)
+
+    # ---------------- 配置列表 ----------------
+    async def list_configs(
+        self,
+        namespace_id: Optional[str] = None,
+        data_id: Optional[str] = None,
+        group_name: Optional[str] = None,
+        app_name: Optional[str] = None,
+        config_tags: Optional[str] = None,
+        search: str = "blur",
+        page_no: int = 1,
+        page_size: int = 100,
+    ) -> dict[str, Any]:
+        """命名空间下配置列表。
+
+        GET `{base_url}/v1/cs/configs?search=blur...`
+        （与 get_config 同路径；带 search 参数返回分页列表，不带返回单条字符串。）
+        """
+        token = await self._ensure_token()
+        ns = self._get_namespace(namespace_id)
+        params: dict[str, Any] = {
+            "search": search,
+            "dataId": data_id or "",
+            "group": group_name or "",
+            "appName": app_name or "",
+            "config_tags": config_tags or "",
+            "tenant": ns,
+            "pageNo": page_no,
+            "pageSize": page_size,
+        }
+        if token:
+            params["accessToken"] = token
+
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/v1/cs/configs",
+            params=params,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        page_items = data.get("pageItems", []) or []
+        total = data.get("totalCount", 0) or 0
+        configs = [
+            {
+                "data_id": i.get("dataId"),
+                "group_name": i.get("group") or i.get("groupName"),
+                "namespace_id": i.get("tenant") or i.get("namespaceId"),
+                "app_name": i.get("appName"),
+                "type": i.get("type"),
+            }
+            for i in page_items
+        ]
+        return {"total": total, "configs": configs}
 
     # ---------------- 命名空间 ----------------
     async def list_namespaces(self) -> list[dict[str, Any]]:
@@ -235,7 +291,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.base_url}/nacos/v1/console/namespaces",
+            f"{self.base_url}/v1/console/namespaces",
             params=params,
             timeout=30.0,
         )
@@ -245,9 +301,10 @@ class NacosClientV1(NacosAuthBase):
 
     async def get_namespace(self, namespace_id: str) -> dict[str, Any]:
         # 1.x 没有"查询单个命名空间"接口，用列表过滤模拟
+        ns = self._get_namespace(namespace_id)  # 含 public->"" 归一化
         items = await self.list_namespaces()
         for item in items:
-            if item.get("namespace") == namespace_id:
+            if item.get("namespace") == ns:
                 return item
         raise Exception(f"命名空间不存在: {namespace_id}")
 
@@ -271,7 +328,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/nacos/v1/console/namespaces",
+            f"{self.base_url}/v1/console/namespaces",
             params=params,
             data=data,
             timeout=30.0,
@@ -301,7 +358,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.put(
-            f"{self.base_url}/nacos/v1/console/namespaces",
+            f"{self.base_url}/v1/console/namespaces",
             params=params,
             data=data,
             timeout=30.0,
@@ -319,7 +376,7 @@ class NacosClientV1(NacosAuthBase):
 
         client = await self._get_client()
         response = await client.delete(
-            f"{self.base_url}/nacos/v1/console/namespaces",
+            f"{self.base_url}/v1/console/namespaces",
             params=params,
             timeout=30.0,
         )

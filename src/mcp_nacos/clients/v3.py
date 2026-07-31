@@ -1,31 +1,9 @@
-"""Nacos 3.x Console API 客户端
+"""Nacos 3.x Console API 客户端。
 
-对接 Nacos 3.x 的「控制台 API（Console API）」
-（https://nacos.io/docs/v3.1/manual/admin/console-api/）。
-路径前缀 /v3/console/（默认 $nacos.console.contextPath 为空，即不带 /nacos；若部署配置了
-nacos.console.contextPath 则需加回前缀），运行在 console 端口（默认 8080）。
-鉴权：登录拿到 accessToken 后，请求头同时携带 accessToken 与
-Authorization: Bearer（兼容 Nacos 3.x）。
-
-Nacos 3.x 有三类 HTTP API：
-- 客户端 API /v3/client/（端口 8848，仅 GET 配置，无发布）
-- 运维 API /v3/admin/（端口 8848，GET/POST/DELETE）
-- 控制台 API /v3/console/（端口 8080，accessToken，含发布）—— 本项目即此模块
-
-版本参数约定：
-- 命名空间路径带 /core/ 段：/v3/console/core/namespace/*
-- 创建命名空间用 customNamespaceId（与 1.x 一致，非 2.x 的 namespaceId）
-- 编辑/删除用 namespaceId
-- 返回统一为 {code,message,data} 信封
-
-配置历史（对应文档 2.14 / 2.15 / 2.16）同样由 Console API 提供：
-- 查询配置发布历史      GET /v3/console/cs/history/list
-- 查询某次历史变更记录  GET /v3/console/cs/history          (参数 nid)
-- 查询上一变更历史      GET /v3/console/cs/history/previous (参数 id)
-三者均使用 groupName 参数与 {code,message,data} 信封返回。
-
-覆盖接口：配置 get/publish/delete、配置历史 list(2.14)/detail(2.15)/previous(2.16)、
-命名空间 list/get/create/update/delete。
+- 路径前缀：/v3/console/；命名空间路径额外带 /core/ 段
+- 创建命名空间：customNamespaceId；编辑/删除：namespaceId
+- 返回信封：{code, message, data}
+- 登录取 accessToken：POST {base_url}/v3/auth/user/login
 """
 
 import os
@@ -34,34 +12,24 @@ from typing import Any, Optional, cast
 
 import httpx2 as httpx
 
-from .base import _resolve_base_url
+from .base import normalize_namespace, resolve_base_url
 
 
 class NacosClientV3:
     """Nacos 3.x Console API 客户端"""
 
     def __init__(self) -> None:
-        self.host = os.getenv("NACOS_HOST", "localhost")
-        self.api_port = int(os.getenv("NACOS_API_PORT", "8848"))
-        self.console_port = int(os.getenv("NACOS_CONSOLE_PORT", "8080"))
         self.username = os.getenv("NACOS_USERNAME")
         self.password = os.getenv("NACOS_PASSWORD")
         self.default_namespace = os.getenv("NACOS_NAMESPACE", "public")
         self._verify = os.getenv("NACOS_INSECURE", "false").lower() != "true"
         self._client: Optional[httpx.AsyncClient] = None
-
         self._access_token: Optional[str] = None
         self._token_expire_time: Optional[float] = None
 
     @property
-    def api_base_url(self) -> str:
-        """API 端口 URL（用于登录，支持 NACOS_BASE_URL 覆盖）"""
-        return _resolve_base_url(self.host, self.api_port)
-
-    @property
-    def console_base_url(self) -> str:
-        """Console 端口 URL（用于配置/命名空间操作，支持 NACOS_BASE_URL 覆盖）"""
-        return _resolve_base_url(self.host, self.console_port)
+    def base_url(self) -> str:
+        return resolve_base_url()
 
     async def _ensure_token(self) -> Optional[str]:
         """确保有有效的 access token（如果需要认证）"""
@@ -74,7 +42,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.post(
-            f"{self.api_base_url}/nacos/v3/auth/user/login",
+            f"{self.base_url}/v3/auth/user/login",
             data={"username": self.username, "password": self.password},
             timeout=30.0,
         )
@@ -87,8 +55,8 @@ class NacosClientV3:
         return self._access_token
 
     def _get_namespace(self, namespace_id: Optional[str]) -> str:
-        """获取命名空间 ID"""
-        return namespace_id or self.default_namespace
+        """获取命名空间 ID（含 public->"" 归一化）。"""
+        return normalize_namespace(namespace_id or self.default_namespace)
 
     async def _auth_headers(self) -> dict[str, str]:
         """构造鉴权请求头：同时携带 accessToken 与 Authorization: Bearer。
@@ -142,7 +110,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.console_base_url}/v3/console/cs/config",
+            f"{self.base_url}/v3/console/cs/config",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -182,7 +150,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.post(
-            f"{self.console_base_url}/v3/console/cs/config",
+            f"{self.base_url}/v3/console/cs/config",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -213,7 +181,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.delete(
-            f"{self.console_base_url}/v3/console/cs/config",
+            f"{self.base_url}/v3/console/cs/config",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -243,7 +211,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.console_base_url}/v3/console/cs/history/list",
+            f"{self.base_url}/v3/console/cs/history/list",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -273,7 +241,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.console_base_url}/v3/console/cs/history",
+            f"{self.base_url}/v3/console/cs/history",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -303,7 +271,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.console_base_url}/v3/console/cs/history/previous",
+            f"{self.base_url}/v3/console/cs/history/previous",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -314,6 +282,68 @@ class NacosClientV3:
             raise TypeError(f"Expected dict, got {type(data).__name__}")
         return cast(dict[str, Any], data)
 
+    # ---------------- 配置：命名空间下配置列表（Console API 真列表端点）----------------
+    async def list_configs(
+        self,
+        namespace_id: Optional[str] = None,
+        data_id: Optional[str] = None,
+        group_name: Optional[str] = None,
+        app_name: Optional[str] = None,
+        config_tags: Optional[str] = None,
+        search: str = "blur",
+        page_no: int = 1,
+        page_size: int = 100,
+    ) -> dict[str, Any]:
+        """查询命名空间下的配置列表（Nacos 3.x Console API 真列表端点）。
+
+        底层 GET /v3/console/cs/config/list（由 ConsoleConfigController 处理），支持
+        dataId/groupName/appName/configTags 过滤（search=blur 模糊 / accurate 精确）与
+        pageNo/pageSize 分页，服务端返回 Page<ConfigBasicInfo>（totalCount + pageItems）。
+        相比旧的 /v3/console/cs/history/configs 简表，能力与 v1/v2 的搜索配置接口对齐。
+
+        归一化返回 {"total": int, "configs": [{"data_id","group_name","namespace_id",
+        "app_name","type"}]}，与 v1/v2 客户端结构一致。
+        """
+        await self._ensure_token()
+        ns = self._get_namespace(namespace_id)
+        params: dict[str, Any] = {
+            "namespaceId": ns,
+            "dataId": data_id or "",
+            "groupName": group_name or "",
+            "appName": app_name or "",
+            "configTags": config_tags or "",
+            "search": search,
+            "pageNo": page_no,
+            "pageSize": page_size,
+        }
+        headers: dict[str, str] = await self._auth_headers()
+
+        client = await self._get_client()
+        response = await client.get(
+            f"{self.base_url}/v3/console/cs/config/list",
+            params=params,
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = self._unwrap(response.json())
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict, got {type(data).__name__}")
+        page_items = data.get("pageItems", []) or []
+        total = data.get("totalCount", 0) or 0
+        # 归一化为 {total, configs}（v3 字段为 dataId/groupName/namespaceId），与 v1/v2 一致
+        configs = [
+            {
+                "data_id": i.get("dataId"),
+                "group_name": i.get("groupName") or i.get("group"),
+                "namespace_id": i.get("namespaceId") or i.get("tenant"),
+                "app_name": i.get("appName"),
+                "type": i.get("type"),
+            }
+            for i in page_items
+        ]
+        return {"total": total, "configs": configs}
+
     # ---------------- 命名空间（Console API 路径含 /core/ 段）----------------
     async def list_namespaces(self) -> list[dict[str, Any]]:
         await self._ensure_token()
@@ -321,7 +351,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.console_base_url}/v3/console/core/namespace/list",
+            f"{self.base_url}/v3/console/core/namespace/list",
             headers=headers,
             timeout=30.0,
         )
@@ -330,12 +360,13 @@ class NacosClientV3:
 
     async def get_namespace(self, namespace_id: str) -> dict[str, Any]:
         await self._ensure_token()
-        params: dict[str, str] = {"namespaceId": namespace_id}
+        ns = self._get_namespace(namespace_id)  # 含 public->"" 归一化
+        params: dict[str, str] = {"namespaceId": ns}
         headers: dict[str, str] = await self._auth_headers()
 
         client = await self._get_client()
         response = await client.get(
-            f"{self.console_base_url}/v3/console/core/namespace",
+            f"{self.base_url}/v3/console/core/namespace",
             params=params,
             headers=headers,
             timeout=30.0,
@@ -363,7 +394,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.post(
-            f"{self.console_base_url}/v3/console/core/namespace",
+            f"{self.base_url}/v3/console/core/namespace",
             data=data,
             headers=headers,
             timeout=30.0,
@@ -388,7 +419,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.put(
-            f"{self.console_base_url}/v3/console/core/namespace",
+            f"{self.base_url}/v3/console/core/namespace",
             data=data,
             headers=headers,
             timeout=30.0,
@@ -403,7 +434,7 @@ class NacosClientV3:
 
         client = await self._get_client()
         response = await client.delete(
-            f"{self.console_base_url}/v3/console/core/namespace",
+            f"{self.base_url}/v3/console/core/namespace",
             params=params,
             headers=headers,
             timeout=30.0,

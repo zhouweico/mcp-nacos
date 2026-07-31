@@ -67,20 +67,21 @@ def test_normalize_version(raw, expected):
 
 
 @pytest.mark.parametrize("version", ["1", "2", "3"])
-async def test_base_url_override(monkeypatch, version):
-    """NACOS_BASE_URL 应覆盖 host:port 基础 URL"""
+async def test_base_url_required(monkeypatch, version):
+    """未设置 NACOS_BASE_URL 时访问 base_url 抛 RuntimeError。"""
     monkeypatch.setenv("NACOS_VERSION", version)
+    monkeypatch.delenv("NACOS_BASE_URL", raising=False)
     monkeypatch.setattr(factory_mod, "_cached_client", None)
     client = await get_nacos_client()
-    # 未设置覆盖时默认使用 http://
-    url = client.api_base_url if hasattr(client, "api_base_url") else client.base_url
-    assert url.startswith("http://")
-    # 设置 NACOS_BASE_URL 后应被覆盖
-    monkeypatch.setenv("NACOS_BASE_URL", "https://nacos.example.com")
+    with pytest.raises(RuntimeError, match="NACOS_BASE_URL"):
+        _ = client.base_url
+
+
+@pytest.mark.parametrize("version", ["1", "2", "3"])
+async def test_base_url_override(monkeypatch, version):
+    """NACOS_BASE_URL 作为唯一地址参数，整地址被识别，不做拼接。"""
+    monkeypatch.setenv("NACOS_VERSION", version)
+    monkeypatch.setenv("NACOS_BASE_URL", "https://nacos.example.com/nacos")
     monkeypatch.setattr(factory_mod, "_cached_client", None)
-    client2 = await get_nacos_client()
-    if hasattr(client2, "api_base_url"):
-        assert client2.api_base_url == "https://nacos.example.com"
-        assert client2.console_base_url == "https://nacos.example.com"
-    else:
-        assert client2.base_url == "https://nacos.example.com"
+    client = await get_nacos_client()
+    assert client.base_url == "https://nacos.example.com/nacos"

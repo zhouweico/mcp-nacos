@@ -9,25 +9,22 @@ services:
     ports:
       - "${MCP_PORT:-8000}:8000"
     environment:
-      # ---- MCP 传输与认证 ----
-      MCP_TRANSPORT: "${MCP_TRANSPORT:-streamable-http}"   # stdio / sse / streamable-http
+      # MCP 传输与认证
+      MCP_TRANSPORT: "${MCP_TRANSPORT:-streamable-http}"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8000"
-      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"                # 设置后启用 Bearer Token 认证
-      MCP_STATELESS_HTTP: "${MCP_STATELESS_HTTP:-false}"   # true 时启用 Stateless HTTP 模式（无会话状态）
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+      MCP_STATELESS_HTTP: "${MCP_STATELESS_HTTP:-false}"
       MCP_LOG_LEVEL: "${MCP_LOG_LEVEL:-info}"
-      # ---- Nacos 连接配置 ----
-      # 若 Nacos 部署在 HTTPS / 反向代理 / 带上下文路径（如 https://nacos.example.com/nacos），
-      # 可设置 NACOS_BASE_URL 覆盖 host:port，此时 NACOS_HOST/NACOS_PORT 不再生效。
-      # NACOS_BASE_URL: "https://nacos.example.com"
-      NACOS_HOST: "${NACOS_HOST:-localhost}"
-      NACOS_API_PORT: "${NACOS_API_PORT:-8848}"
-      NACOS_CONSOLE_PORT: "${NACOS_CONSOLE_PORT:-8080}"
+      # Nacos 连接：NACOS_BASE_URL = scheme://host[:port][/context-path]（必填）
+      #   1.x/2.x 默认带 /nacos；3.x 默认无；经反向代理时代理前缀加在地址里
+      NACOS_BASE_URL: "${NACOS_BASE_URL:?NACOS_BASE_URL is required}"
       NACOS_USERNAME: "${NACOS_USERNAME:-}"
       NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
       NACOS_NAMESPACE: "${NACOS_NAMESPACE:-public}"
       NACOS_VERSION: "${NACOS_VERSION:-3}"
       NACOS_READ_ONLY: "${NACOS_READ_ONLY:-false}"
+      NACOS_INSECURE: "${NACOS_INSECURE:-false}"
     healthcheck:
       test:
         - "CMD"

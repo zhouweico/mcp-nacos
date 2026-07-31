@@ -88,18 +88,14 @@ def test_e2e_mcp_stdio():
         env.update(
             {
                 "NACOS_VERSION": "3",
-                "NACOS_HOST": "127.0.0.1",
-                "NACOS_API_PORT": str(MOCK_PORT),
-                "NACOS_CONSOLE_PORT": str(MOCK_PORT),
+                "NACOS_BASE_URL": f"http://127.0.0.1:{MOCK_PORT}",
                 "MCP_TRANSPORT": "stdio",
                 # 不设用户名/密码 -> v3 不走登录，直接以无 token 访问 mock
             }
         )
 
         async def run():
-            params = StdioServerParameters(
-                command=sys.executable, args=["-m", "mcp_nacos"], env=env
-            )
+            params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_nacos"], env=env)
             # mcp 2.0+：Client 直接包裹 stdio_client 提供的传输，自动完成 initialize
             async with Client(stdio_client(params)) as client:
                 # 1) 工具发现
@@ -125,8 +121,8 @@ def test_e2e_mcp_stdio():
                 text_pub = _text(res_pub)
                 assert "成功" in text_pub, f"写工具返回异常: {text_pub}"
 
-                # 4) 工具发现数量应为 11
-                assert len(names) == 11, f"预期 11 个工具，实际 {len(names)}"
+                # 4) 工具发现数量应为 12
+                assert len(names) == 12, f"预期 12 个工具，实际 {len(names)}"
 
         asyncio.run(run())
     finally:

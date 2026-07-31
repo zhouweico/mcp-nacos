@@ -15,6 +15,7 @@ ALL_TOOLS = {
     "nacos_list_config_history",
     "nacos_get_config_history",
     "nacos_get_config_previous",
+    "nacos_list_configs",
     "nacos_list_namespaces",
     "nacos_get_namespace",
     "nacos_publish_config",
@@ -38,9 +39,7 @@ def _result_text(result: object) -> str:
     if isinstance(result, str):
         return result
     if isinstance(result, CallToolResult):
-        return "".join(
-            getattr(c, "text", "") for c in result.content if hasattr(c, "text")
-        )
+        return "".join(getattr(c, "text", "") for c in result.content if hasattr(c, "text"))
     return str(result)
 
 
@@ -80,15 +79,56 @@ async def test_invoke_get_config(monkeypatch):
     assert "server:" in text and "app.yaml" in text
 
 
+async def test_invoke_list_configs(monkeypatch):
+    fake = AsyncMock()
+    fake.default_namespace = "public"
+    fake.list_configs = AsyncMock(
+        return_value={
+            "total": 2,
+            "configs": [
+                {"data_id": "app.yaml", "group_name": "DEFAULT_GROUP"},
+                {"data_id": "user.yaml", "group_name": "DEFAULT_GROUP"},
+            ],
+        }
+    )
+    monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
+
+    out = await server.nacos_list_configs(namespace_id="public")
+    text = _result_text(out)
+    assert "app.yaml" in text and "user.yaml" in text
+
+
+async def test_invoke_list_configs_filters(monkeypatch):
+    fake = AsyncMock()
+    fake.default_namespace = "public"
+    fake.list_configs = AsyncMock(
+        return_value={"total": 1, "configs": [{"data_id": "app.yaml", "group_name": "DEFAULT_GROUP"}]}
+    )
+    monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
+
+    # v1/v2 支持按 data_id 过滤并透传全部参数
+    out = await server.nacos_list_configs(namespace_id="dev", data_id="app", page_size=20)
+    text = _result_text(out)
+    assert "app.yaml" in text
+    fake.list_configs.assert_awaited_once_with(
+        namespace_id="dev",
+        data_id="app",
+        group_name=None,
+        app_name=None,
+        config_tags=None,
+        search="blur",
+        page_no=1,
+        page_size=20,
+    )
+
+
 async def test_invoke_publish_config(monkeypatch):
     fake = AsyncMock()
     fake.default_namespace = "public"
     fake.publish_config = AsyncMock(return_value=True)
     monkeypatch.setattr(server, "get_nacos_client", AsyncMock(return_value=fake))
 
-    out = await server.nacos_publish_config(
-        data_id="app.yaml", content="foo: bar", config_type=ConfigType.YAML
-    )
+    out = await server.nacos_publish_config(data_id="app.yaml", content="foo: bar", config_type=ConfigType.YAML)
     assert "成功" in out
 
 

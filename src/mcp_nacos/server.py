@@ -1,11 +1,4 @@
-"""Nacos MCP Server
-
-提供与 Nacos 配置中心交互的 MCP 工具。
-支持 Nacos 1.x / 2.x / 3.x（默认 3.x，由 NACOS_VERSION 决定）。
-
-所有工具的最新说明见各工具 docstring；工具入参均为扁平字段（非嵌套对象），
-便于 MCP 客户端与 LLM 直接填充。
-"""
+"""Nacos MCP Server（Nacos 1.x/2.x/3.x）。"""
 
 import json
 import logging
@@ -24,13 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import TokenAuthMiddleware
 from .client import get_nacos_client, reset_nacos_client
+from .clients.base import UnsupportedVersionError
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def app_lifespan(server: MCPServer) -> AsyncIterator[dict[str, Any]]:
-    """管理客户端生命周期：启动时预创建客户端，关闭时清理 HTTP 连接。"""
     client = await get_nacos_client()
     try:
         yield {"client": client}
@@ -43,13 +36,12 @@ async def app_lifespan(server: MCPServer) -> AsyncIterator[dict[str, Any]]:
             reset_nacos_client()
 
 
-# 创建 MCP Server
 mcp = MCPServer(
     "nacos_mcp",
     instructions=(
         "Nacos 配置中心 MCP Server。"
         "支持 Nacos 1.x/2.x/3.x（默认 3.x，由 NACOS_VERSION 决定）。"
-        "提供配置读取、发布、删除及命名空间管理工具。"
+        "提供配置读取、发布、删除、命名空间下配置列表查询及命名空间管理工具。"
         "所有写操作在 NACOS_READ_ONLY=true 时不可用。"
     ),
     lifespan=app_lifespan,
@@ -159,6 +151,20 @@ class GetNamespaceOutput(BaseModel):
     type: Optional[int] = None
 
 
+class ListConfigsOutput(BaseModel):
+    """nacos_list_configs 结构化输出模型。
+
+    包含目标命名空间下配置的元数据列表（data_id / group_name / namespace_id /
+    app_name / type）与总数 total_count（不含配置内容）。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    namespace_id: Optional[str] = None
+    total_count: Optional[int] = None
+    configs: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def _ro(title: str) -> ToolAnnotations:
     """只读工具注解"""
     return ToolAnnotations(
@@ -188,14 +194,12 @@ def _to_json(data: Any) -> str:
 
 class _ConfirmSchema(BaseModel):
     """MRTR 确认表单 schema"""
+
     confirm: bool = Field(..., description="确认执行此操作")
 
 
 async def _confirm_action(ctx: Optional[Context], action_desc: str) -> tuple[bool, str]:
-    """通过 MRTR 确认破坏性操作。
-
-    ctx 不可用时降级为直接执行。
-    """
+    """MRTR 确认破坏性操作；ctx 不可用时降级为直接执行。"""
     if not ctx:
         return True, ""
     try:
@@ -212,7 +216,8 @@ async def _confirm_action(ctx: Optional[Context], action_desc: str) -> tuple[boo
 
 
 def handle_error(e: Exception) -> str:
-    """统一错误处理：转换为中文可读提示，不抛栈。"""
+    if isinstance(e, UnsupportedVersionError):
+        return str(e)
     if isinstance(e, httpx.HTTPStatusError):
         status = e.response.status_code
         if status in (401, 403, 404):
@@ -231,7 +236,7 @@ def handle_error(e: Exception) -> str:
         return "错误：请求超时，请检查 Nacos 服务是否可用"
     elif isinstance(e, httpx.ConnectError):
         logger.warning("网络异常: %s", type(e).__name__)
-        return "错误：无法连接到 Nacos，请检查 NACOS_HOST、NACOS_API_PORT、NACOS_CONSOLE_PORT"
+        return "错误：无法连接到 Nacos，请检查 NACOS_BASE_URL（含协议、地址、端口及可选的上下文路径）"
     logger.error("工具调用异常", exc_info=e)
     return f"错误：{type(e).__name__}: {str(e)}"
 
@@ -255,12 +260,7 @@ async def nacos_get_config(
     ] = "DEFAULT_GROUP",
     namespace_id: Annotated[
         Optional[str],
-        Field(
-            description=(
-                "命名空间 ID（如 dev/prod）；优先级：工具参数 > "
-                "NACOS_NAMESPACE 环境变量 > 默认 public"
-            )
-        ),
+        Field(description=("命名空间 ID（如 dev/prod）；优先级：工具参数 > NACOS_NAMESPACE 环境变量 > 默认 public")),
     ] = None,
     response_format: Annotated[
         ResponseFormat, Field(description="输出格式：markdown 或 json")
@@ -287,16 +287,10 @@ async def nacos_get_config(
         if not data or not data.get("content"):
             ns = namespace_id or nacos_client.default_namespace
             return CallToolResult(
-                content=[
-                    TextContent(
-                        text=f"配置不存在：dataId={data_id}, group={group_name}, "
-                        f"namespace={ns}"
-                    )
-                ],
+                content=[TextContent(text=f"配置不存在：dataId={data_id}, group={group_name}, namespace={ns}")],
                 structured_content={},
             )
 
-        # 结构化数据（同时用于 JSON 输出与 structured_content）
         config_data: dict[str, Any] = {
             "data_id": data.get("dataId"),
             "group_name": data.get("groupName"),
@@ -308,11 +302,7 @@ async def nacos_get_config(
 
         if response_format == ResponseFormat.JSON:
             return CallToolResult(
-                content=[
-                    TextContent(
-                        text=json.dumps(config_data, ensure_ascii=False, indent=2)
-                    )
-                ],
+                content=[TextContent(text=json.dumps(config_data, ensure_ascii=False, indent=2))],
                 structured_content=config_data,
             )
 
@@ -442,9 +432,7 @@ async def nacos_get_config_history(
     structured_output=True,
 )
 async def nacos_get_config_previous(
-    config_id: Annotated[
-        int, Field(description="配置存储 ID（对应历史接口中的 id 字段），必填", ge=0)
-    ],
+    config_id: Annotated[int, Field(description="配置存储 ID（对应历史接口中的 id 字段），必填", ge=0)],
     data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
     group_name: Annotated[
         str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
@@ -519,8 +507,11 @@ async def nacos_get_namespace(
     namespace_id: Annotated[
         str,
         Field(
-            description="命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public",
-            min_length=1,
+            description=(
+                "命名空间 ID。优先级：工具参数 > 环境变量 NACOS_NAMESPACE > 默认 public。"
+                "查 public 传 'public' 或空串均可（工具会自动归一化：public 的真实 id 因版本而异，"
+                "2.x 为空串，已统一处理）"
+            ),
         ),
     ],
 ) -> Annotated[CallToolResult, GetNamespaceOutput]:
@@ -531,7 +522,8 @@ async def nacos_get_namespace(
     - v2：GET /nacos/v2/console/namespace
     - v3：GET /v3/console/core/namespace（Console API）
 
-    按 namespace_id 返回该命名空间的配额、使用量等详情。
+    按 namespace_id 返回该命名空间的配额、使用量等详情。public 命名空间已自动归一化
+    （传 'public' 或空串都可查到，底层统一用空串 ""，三版本行为一致）。
     """
     try:
         nacos_client = await get_nacos_client()
@@ -548,7 +540,99 @@ async def nacos_get_namespace(
         )
 
 
+@mcp.tool(
+    name="nacos_list_configs",
+    annotations=_ro("查询命名空间下配置列表"),
+    structured_output=True,
+)
+async def nacos_list_configs(
+    namespace_id: Annotated[
+        Optional[str],
+        Field(description=("命名空间 ID；优先级：工具参数 > NACOS_NAMESPACE 环境变量 > 默认 public")),
+    ] = None,
+    data_id: Annotated[
+        Optional[str],
+        Field(description=(
+            "按 dataId 过滤（可选）。search=blur 下需显式带通配符如 '*app*'，裸子串 'app' 不命中；完整 dataId 精确命中。"
+        )),
+    ] = None,
+    group_name: Annotated[
+        Optional[str],
+        Field(description="按 group 过滤（可选，默认不过滤）；模糊匹配同 data_id，需显式带通配符 '*'"),
+    ] = None,
+    app_name: Annotated[
+        Optional[str],
+        Field(description="按 appName 过滤（可选）"),
+    ] = None,
+    config_tags: Annotated[
+        Optional[str],
+        Field(description="按配置标签 config_tags 过滤（可选）"),
+    ] = None,
+    search: Annotated[
+        str,
+        Field(description=(
+            "匹配模式：blur（默认）解释 dataId/group 中的通配符 '*' 做 LIKE 匹配；"
+            "accurate 精确匹配。二者在不带通配符时行为一致（完整名命中、子串不命中）"
+        )),
+    ] = "blur",
+    page_no: Annotated[
+        int,
+        Field(description="分页页码，从 1 开始（默认 1）"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(description="每页条数（默认 100）"),
+    ] = 100,
+) -> Annotated[CallToolResult, ListConfigsOutput]:
+    """查询命名空间下的配置列表（只读）。
+
+    对应 Nacos OpenAPI：
+    - v1 / v2：GET /nacos/v1/cs/configs?search=blur（搜索配置接口，Nacos 1.x/2.x 服务端均支持）
+    - v3：GET /v3/console/cs/config/list（Console API 真列表端点，返回 Page<ConfigBasicInfo>）
+    三版本均支持 dataId/group/appName/config_tags 过滤 + pageNo/pageSize 分页，能力已对齐。
+
+    匹配语义（本地 1.x/2.x/3.x 实测一致）：search=blur 不会自动为 dataId/group 补通配符，
+    传子串不命中；需模糊匹配时显式传 '*关键词*'。传完整 dataId 精确命中一条。
+
+    返回该命名空间下配置的 data_id + group_name 等元数据列表（不含配置内容），并附 total 总数。
+    """
+    try:
+        nacos_client = await get_nacos_client()
+        ns = namespace_id or nacos_client.default_namespace
+        result = await nacos_client.list_configs(
+            namespace_id=namespace_id,
+            data_id=data_id,
+            group_name=group_name,
+            app_name=app_name,
+            config_tags=config_tags,
+            search=search,
+            page_no=page_no,
+            page_size=page_size,
+        )
+        if isinstance(result, dict):
+            configs_list = result.get("configs", []) or []
+            total = result.get("total", len(configs_list))
+        else:
+            configs_list = result if isinstance(result, list) else []
+            total = len(configs_list)
+        structured = {
+            "namespace_id": ns,
+            "total_count": total,
+            "configs": configs_list,
+        }
+        return CallToolResult(
+            content=[TextContent(text=_to_json(structured))],
+            structured_content=structured,
+        )
+    except Exception as e:
+        return CallToolResult(
+            content=[TextContent(text=handle_error(e))],
+            structured_content={},
+        )
+
+
 # ===== MCP Resources：只读元数据暴露 =====
+
 
 @mcp.resource("nacos://namespaces")
 async def resource_namespaces() -> str:
@@ -569,9 +653,7 @@ if not _read_only:
 
     @mcp.tool(name="nacos_publish_config", annotations=_rw("发布 Nacos 配置", idempotent=True))
     async def nacos_publish_config(
-        data_id: Annotated[
-            str, Field(description="配置 ID，如 'application.yaml'", min_length=1, max_length=256)
-        ],
+        data_id: Annotated[str, Field(description="配置 ID，如 'application.yaml'", min_length=1, max_length=256)],
         content: Annotated[str, Field(description="配置内容", min_length=1)],
         group_name: Annotated[
             str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
@@ -597,9 +679,11 @@ if not _read_only:
         """
         try:
             if ctx:
-                await ctx.report_progress(0, 0,
+                await ctx.report_progress(
+                    0,
+                    0,
                     f"正在发布配置：dataId={data_id}, group={group_name}, "
-                    f"namespace={namespace_id or '默认'}, type={config_type.value}"
+                    f"namespace={namespace_id or '默认'}, type={config_type.value}",
                 )
             nacos_client = await get_nacos_client()
             success = await nacos_client.publish_config(
@@ -658,9 +742,8 @@ if not _read_only:
                 )
                 if not proceed:
                     return msg
-                await ctx.report_progress(0, 0,
-                    f"正在删除配置：dataId={data_id}, group={group_name}, "
-                    f"namespace={namespace_id or '默认'}"
+                await ctx.report_progress(
+                    0, 0, f"正在删除配置：dataId={data_id}, group={group_name}, namespace={namespace_id or '默认'}"
                 )
             nacos_client = await get_nacos_client()
             success = await nacos_client.delete_config(
@@ -682,10 +765,7 @@ if not _read_only:
         namespace_id: Annotated[
             str,
             Field(
-                description=(
-                    "命名空间 ID；优先级：工具参数 > "
-                    "NACOS_NAMESPACE 环境变量 > 默认 public"
-                ),
+                description=("命名空间 ID；优先级：工具参数 > NACOS_NAMESPACE 环境变量 > 默认 public"),
                 min_length=1,
             ),
         ],
@@ -702,9 +782,7 @@ if not _read_only:
         """
         try:
             if ctx:
-                await ctx.report_progress(0, 0,
-                    f"正在创建命名空间：namespaceId={namespace_id}, name={namespace_name}"
-                )
+                await ctx.report_progress(0, 0, f"正在创建命名空间：namespaceId={namespace_id}, name={namespace_name}")
             nacos_client = await get_nacos_client()
             success = await nacos_client.create_namespace(
                 namespace_id=namespace_id,
@@ -724,10 +802,7 @@ if not _read_only:
         namespace_id: Annotated[
             str,
             Field(
-                description=(
-                    "命名空间 ID；优先级：工具参数 > "
-                    "NACOS_NAMESPACE 环境变量 > 默认 public"
-                ),
+                description=("命名空间 ID；优先级：工具参数 > NACOS_NAMESPACE 环境变量 > 默认 public"),
                 min_length=1,
             ),
         ],
@@ -744,9 +819,7 @@ if not _read_only:
         """
         try:
             if ctx:
-                await ctx.report_progress(0, 0,
-                    f"正在更新命名空间：namespaceId={namespace_id}, name={namespace_name}"
-                )
+                await ctx.report_progress(0, 0, f"正在更新命名空间：namespaceId={namespace_id}, name={namespace_name}")
             nacos_client = await get_nacos_client()
             success = await nacos_client.update_namespace(
                 namespace_id=namespace_id,
@@ -769,10 +842,7 @@ if not _read_only:
         namespace_id: Annotated[
             str,
             Field(
-                description=(
-                    "命名空间 ID；优先级：工具参数 > "
-                    "NACOS_NAMESPACE 环境变量 > 默认 public"
-                ),
+                description=("命名空间 ID；优先级：工具参数 > NACOS_NAMESPACE 环境变量 > 默认 public"),
                 min_length=1,
             ),
         ],
@@ -826,9 +896,9 @@ def _run_http(transport: str) -> None:
 
     if transport == "sse":
         import warnings
+
         warnings.warn(
-            "SSE 传输协议已废弃，建议使用 streamable-http。"
-            "设置 MCP_TRANSPORT=streamable-http 以切换。",
+            "SSE 传输协议已废弃，建议使用 streamable-http。设置 MCP_TRANSPORT=streamable-http 以切换。",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -842,8 +912,8 @@ def _run_http(transport: str) -> None:
         if stateless:
             logger.info("已启用 Stateless HTTP 模式（每次请求独立，无会话状态）")
 
-    # 健康检查路由：在鉴权中间件包裹之前挂载，保证无论是否开启鉴权都能探活。
-    # MCPServer 原生 app 仅暴露 /mcp（或 /sse），不含 /health。
+    # /health 在鉴权中间件之前挂载，始终可访问（容器探活）。
+    # MCPServer 原生 app 仅暴露 /mcp 与 /sse。
     from starlette.requests import Request
     from starlette.responses import JSONResponse
 

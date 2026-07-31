@@ -6,10 +6,15 @@ import pytest
 
 @pytest.fixture
 def http_mock(monkeypatch):
-    """返回一个 set_handler(fn) 函数，fn 签名为 (request) -> httpx.Response。
+    """返回 set_handler(fn)，fn 签名：(request) -> httpx.Response。
 
-    客户端代码中调用的是无参的 httpx.AsyncClient()，这里统一注入 MockTransport。
+    预置 `NACOS_BASE_URL=http://localhost:8848` 与 `NACOS_NAMESPACE=public`，
+    并移除 NACOS_USERNAME / NACOS_PASSWORD，避免触发登录流程。
     """
+    monkeypatch.setenv("NACOS_BASE_URL", "http://localhost:8848")
+    monkeypatch.setenv("NACOS_NAMESPACE", "public")
+    monkeypatch.delenv("NACOS_USERNAME", raising=False)
+    monkeypatch.delenv("NACOS_PASSWORD", raising=False)
 
     holder: dict = {"handler": None}
     real_async_client = httpx.AsyncClient

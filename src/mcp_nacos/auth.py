@@ -1,11 +1,9 @@
-"""HTTP 传输的简单 Bearer Token 认证中间件（纯 ASGI 实现）。
+"""HTTP 传输 Bearer Token 认证中间件（纯 ASGI）。
 
-仅用于保护 sse / streamable-http 两种 HTTP 传输的接口，stdio 传输不受影响。
-认证方式：请求头携带 `Authorization: Bearer <token>`，
-兼容 `X-Auth-Token: <token>` 与 `X-MCP-Token: <token>`。
-
-设计为纯 ASGI 中间件，避免依赖具体版本的 Starlette 中间件 API，
-可直接包裹 MCPServer 返回的 sse_app() / streamable_http_app()。
+- 非 HTTP scope（lifespan / websocket）透传
+- `health_path` 免鉴权（容器探活）
+- 其余请求需携带正确 Token，否则 401
+- Token 头：`Authorization: Bearer` / `X-Auth-Token` / `X-MCP-Token`
 """
 
 from __future__ import annotations
