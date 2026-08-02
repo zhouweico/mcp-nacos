@@ -23,7 +23,7 @@ services:
       NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
       NACOS_NAMESPACE: "${NACOS_NAMESPACE:-public}"
       NACOS_VERSION: "${NACOS_VERSION:-3}"
-      NACOS_READ_ONLY: "${NACOS_READ_ONLY:-false}"
+      NACOS_READ_ONLY: "${NACOS_READ_ONLY:-true}"
       NACOS_INSECURE: "${NACOS_INSECURE:-false}"
     healthcheck:
       test:

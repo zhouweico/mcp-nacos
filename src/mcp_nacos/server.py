@@ -10,8 +10,7 @@ from typing import Annotated, Any, Optional
 
 import httpx2 as httpx
 from mcp.server import MCPServer
-from mcp.server.elicitation import AcceptedElicitation
-from mcp.server.mcpserver.context import Context
+from mcp.server.mcpserver import AcceptedElicitation, Context, Elicit, ElicitationResult, Resolve
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,7 +40,7 @@ mcp = MCPServer(
         "Nacos 配置中心 MCP Server。"
         "支持 Nacos 1.x/2.x/3.x（默认 3.x，由 NACOS_VERSION 决定）。"
         "提供配置读取、发布、删除、命名空间下配置列表查询及命名空间管理工具。"
-        "所有写操作在 NACOS_READ_ONLY=true 时不可用。"
+        "写操作默认不可用，需显式设置 NACOS_READ_ONLY=false 开启。"
     ),
     lifespan=app_lifespan,
 )
@@ -188,7 +187,7 @@ def _rw(title: str, destructive: bool = False, idempotent: bool = False) -> Tool
 
 def _to_json(data: Any) -> str:
     """将对象序列化为可读 JSON 字符串"""
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
 
 class _ConfirmSchema(BaseModel):
@@ -197,21 +196,69 @@ class _ConfirmSchema(BaseModel):
     confirm: bool = Field(..., description="确认执行此操作")
 
 
-async def _confirm_action(ctx: Optional[Context], action_desc: str) -> tuple[bool, str]:
-    """MRTR 确认破坏性操作；ctx 不可用时降级为直接执行。"""
-    if not ctx:
-        return True, ""
-    try:
-        result = await ctx.elicit(
-            f"⚠️ 确认{action_desc}？此操作不可逆。",
-            _ConfirmSchema,
-        )
-        if isinstance(result, AcceptedElicitation) and result.data.confirm:
-            return True, ""
-        return False, "已取消操作"
-    except Exception:
-        logger.exception("确认流程异常：%s", action_desc)
-        return False, "确认流程异常，已中止操作"
+def _is_confirmed(result: ElicitationResult[_ConfirmSchema]) -> bool:
+    """判断 ElicitationResult 是否为用户确认执行。"""
+    return isinstance(result, AcceptedElicitation) and result.data.confirm
+
+
+def _cancelled() -> CallToolResult:
+    """用户取消/拒绝确认时的统一返回。"""
+    return CallToolResult(
+        content=[TextContent(text="已取消操作")],
+        structured_content={},
+    )
+
+
+# ---- 写前确认 resolver（MCP 2026-07-28 规范原生方式）----
+# 确认前置到参数解析阶段，由 SDK 按协议版本自动选择传输方式
+# （2025 同步 elicit / 2026 MRTR）。客户端不支持 Elicitation 时 SDK 直接返回
+# -32021 拒绝，写工具不再执行（fail-closed）。
+# resolver 参数须为 Context / Annotated[Resolve] / 工具参数之一，SDK 按名匹配注入。
+
+
+async def _publish_config_resolver(
+    ctx: Context, data_id: str, group_name: str
+) -> Elicit[_ConfirmSchema]:
+    """发布配置确认：展示 dataId 与 group。"""
+    return Elicit(f"⚠️ 确认发布配置 (dataId={data_id}, group={group_name})?", _ConfirmSchema)
+
+
+async def _delete_config_resolver(
+    ctx: Context, data_id: str, group_name: str
+) -> Elicit[_ConfirmSchema]:
+    """删除配置确认：展示 dataId 与 group，标注不可逆。"""
+    return Elicit(
+        f"⚠️ 确认删除配置 (dataId={data_id}, group={group_name})? 此操作不可逆。",
+        _ConfirmSchema,
+    )
+
+
+async def _create_namespace_resolver(
+    ctx: Context, namespace_id: str, namespace_name: str
+) -> Elicit[_ConfirmSchema]:
+    """创建命名空间确认：展示 namespaceId 与 name。"""
+    return Elicit(
+        f"⚠️ 确认创建命名空间 (id={namespace_id}, name={namespace_name})?",
+        _ConfirmSchema,
+    )
+
+
+async def _update_namespace_resolver(
+    ctx: Context, namespace_id: str, namespace_name: str
+) -> Elicit[_ConfirmSchema]:
+    """更新命名空间确认：展示 namespaceId 与 name。"""
+    return Elicit(
+        f"⚠️ 确认更新命名空间 (id={namespace_id}, name={namespace_name})?",
+        _ConfirmSchema,
+    )
+
+
+async def _delete_namespace_resolver(ctx: Context, namespace_id: str) -> Elicit[_ConfirmSchema]:
+    """删除命名空间确认：标注将清除其下所有配置。"""
+    return Elicit(
+        f"⚠️ 确认删除命名空间 {namespace_id}? 将一并清除其下所有配置，此操作不可逆。",
+        _ConfirmSchema,
+    )
 
 
 def handle_error(e: Exception) -> str:
@@ -646,14 +693,22 @@ async def resource_namespaces() -> str:
 
 
 # 只读模式检查
-_read_only = os.getenv("NACOS_READ_ONLY", "false").lower() == "true"
+_read_only = os.getenv("NACOS_READ_ONLY", "true").lower() == "true"
 
 if not _read_only:
 
-    @mcp.tool(name="nacos_publish_config", annotations=_rw("发布 Nacos 配置", idempotent=True))
+    @mcp.tool(
+        name="nacos_publish_config",
+        annotations=_rw("发布 Nacos 配置", idempotent=True),
+        structured_output=True,
+    )
     async def nacos_publish_config(
         data_id: Annotated[str, Field(description="配置 ID，如 'application.yaml'", min_length=1, max_length=256)],
         content: Annotated[str, Field(description="配置内容", min_length=1)],
+        confirm: Annotated[
+            ElicitationResult[_ConfirmSchema],
+            Resolve(_publish_config_resolver),
+        ],
         group_name: Annotated[
             str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
         ] = "DEFAULT_GROUP",
@@ -666,7 +721,7 @@ if not _read_only:
         ] = ConfigType.YAML,
         desc: Annotated[Optional[str], Field(description="配置描述，可选")] = None,
         ctx: Optional[Context] = None,
-    ) -> str:
+    ) -> CallToolResult:
         """发布/更新 Nacos 配置（创建或覆盖已有配置，发布即生效）。
 
         对应 Nacos OpenAPI：
@@ -676,6 +731,8 @@ if not _read_only:
 
         创建新配置或覆盖已有配置（dataId + group + namespace 唯一确定）。
         """
+        if not _is_confirmed(confirm):
+            return _cancelled()
         try:
             if ctx:
                 await ctx.report_progress(
@@ -693,11 +750,10 @@ if not _read_only:
                 config_type=config_type.value,
                 desc=desc,
             )
-
+            ns = namespace_id or nacos_client.default_namespace
             if success:
                 if ctx:
                     await ctx.report_progress(0, 0, f"配置发布成功：dataId={data_id}, group={group_name}")
-                ns = namespace_id or nacos_client.default_namespace
                 lines = [
                     "配置发布成功",
                     "",
@@ -708,25 +764,43 @@ if not _read_only:
                     f"| Namespace | {ns} |",
                     f"| Type | {config_type.value} |",
                 ]
-                return "\n".join(lines)
-            else:
-                return "配置发布失败：未知原因"
-
+                return CallToolResult(
+                    content=[TextContent(text="\n".join(lines))],
+                    structured_content={
+                        "success": True,
+                        "data_id": data_id,
+                        "group_name": group_name,
+                        "namespace_id": ns,
+                        "type": config_type.value,
+                    },
+                )
+            return CallToolResult(
+                content=[TextContent(text="配置发布失败：未知原因")],
+                structured_content={"success": False},
+            )
         except Exception as e:
-            return handle_error(e)
+            return CallToolResult(
+                content=[TextContent(text=handle_error(e))],
+                structured_content={},
+            )
 
     @mcp.tool(
         name="nacos_delete_config",
         annotations=_rw("删除 Nacos 配置", destructive=True, idempotent=True),
+        structured_output=True,
     )
     async def nacos_delete_config(
         data_id: Annotated[str, Field(description="配置 ID", min_length=1, max_length=256)],
+        confirm: Annotated[
+            ElicitationResult[_ConfirmSchema],
+            Resolve(_delete_config_resolver),
+        ],
         group_name: Annotated[
             str, Field(description="配置分组，默认 DEFAULT_GROUP", min_length=1, max_length=128)
         ] = "DEFAULT_GROUP",
         namespace_id: Annotated[Optional[str], Field(description="命名空间 ID，可选")] = None,
         ctx: Optional[Context] = None,
-    ) -> str:
+    ) -> CallToolResult:
         """删除 Nacos 配置（按 dataId + group + namespace 唯一删除）。
 
         对应 Nacos OpenAPI：
@@ -734,13 +808,10 @@ if not _read_only:
         - v2：DELETE /nacos/v2/cs/config
         - v3：DELETE /v3/console/cs/config（Console API）
         """
+        if not _is_confirmed(confirm):
+            return _cancelled()
         try:
             if ctx:
-                proceed, msg = await _confirm_action(
-                    ctx, f"删除配置 dataId={data_id}, group={group_name}, namespace={namespace_id or '默认'}"
-                )
-                if not proceed:
-                    return msg
                 await ctx.report_progress(
                     0, 0, f"正在删除配置：dataId={data_id}, group={group_name}, namespace={namespace_id or '默认'}"
                 )
@@ -754,12 +825,34 @@ if not _read_only:
             if success:
                 if ctx:
                     await ctx.report_progress(0, 0, f"配置删除成功：dataId={data_id}, group={group_name}")
-                return f"配置删除成功：dataId={data_id}, group={group_name}, namespace={ns}"
-            return "配置删除失败：未知原因"
+                return CallToolResult(
+                    content=[
+                        TextContent(
+                            text=f"配置删除成功：dataId={data_id}, group={group_name}, namespace={ns}"
+                        )
+                    ],
+                    structured_content={
+                        "success": True,
+                        "data_id": data_id,
+                        "group_name": group_name,
+                        "namespace_id": ns,
+                    },
+                )
+            return CallToolResult(
+                content=[TextContent(text="配置删除失败：未知原因")],
+                structured_content={"success": False},
+            )
         except Exception as e:
-            return handle_error(e)
+            return CallToolResult(
+                content=[TextContent(text=handle_error(e))],
+                structured_content={},
+            )
 
-    @mcp.tool(name="nacos_create_namespace", annotations=_rw("创建命名空间"))
+    @mcp.tool(
+        name="nacos_create_namespace",
+        annotations=_rw("创建命名空间"),
+        structured_output=True,
+    )
     async def nacos_create_namespace(
         namespace_id: Annotated[
             str,
@@ -769,9 +862,13 @@ if not _read_only:
             ),
         ],
         namespace_name: Annotated[str, Field(description="命名空间名称", min_length=1)],
+        confirm: Annotated[
+            ElicitationResult[_ConfirmSchema],
+            Resolve(_create_namespace_resolver),
+        ],
         namespace_desc: Annotated[Optional[str], Field(description="命名空间描述，可选")] = None,
         ctx: Optional[Context] = None,
-    ) -> str:
+    ) -> CallToolResult:
         """创建 Nacos 命名空间（指定命名空间 ID 与名称）。
 
         对应 Nacos OpenAPI：
@@ -779,6 +876,8 @@ if not _read_only:
         - v2：POST /nacos/v2/console/namespace（参数 namespaceId）
         - v3：POST /v3/console/core/namespace（Console API，参数 customNamespaceId）
         """
+        if not _is_confirmed(confirm):
+            return _cancelled()
         try:
             if ctx:
                 await ctx.report_progress(0, 0, f"正在创建命名空间：namespaceId={namespace_id}, name={namespace_name}")
@@ -791,12 +890,29 @@ if not _read_only:
             if success:
                 if ctx:
                     await ctx.report_progress(0, 0, f"命名空间创建成功：namespaceId={namespace_id}")
-                return f"命名空间创建成功：namespaceId={namespace_id}"
-            return "命名空间创建失败：未知原因"
+                return CallToolResult(
+                    content=[TextContent(text=f"命名空间创建成功：namespaceId={namespace_id}")],
+                    structured_content={
+                        "success": True,
+                        "namespace_id": namespace_id,
+                        "namespace_name": namespace_name,
+                    },
+                )
+            return CallToolResult(
+                content=[TextContent(text="命名空间创建失败：未知原因")],
+                structured_content={"success": False},
+            )
         except Exception as e:
-            return handle_error(e)
+            return CallToolResult(
+                content=[TextContent(text=handle_error(e))],
+                structured_content={},
+            )
 
-    @mcp.tool(name="nacos_update_namespace", annotations=_rw("编辑命名空间", idempotent=True))
+    @mcp.tool(
+        name="nacos_update_namespace",
+        annotations=_rw("编辑命名空间", idempotent=True),
+        structured_output=True,
+    )
     async def nacos_update_namespace(
         namespace_id: Annotated[
             str,
@@ -806,9 +922,13 @@ if not _read_only:
             ),
         ],
         namespace_name: Annotated[str, Field(description="命名空间名称，必填", min_length=1)],
+        confirm: Annotated[
+            ElicitationResult[_ConfirmSchema],
+            Resolve(_update_namespace_resolver),
+        ],
         namespace_desc: Annotated[Optional[str], Field(description="命名空间描述，可选")] = None,
         ctx: Optional[Context] = None,
-    ) -> str:
+    ) -> CallToolResult:
         """更新命名空间名称/描述。
 
         对应 Nacos OpenAPI：
@@ -816,6 +936,8 @@ if not _read_only:
         - v2：PUT /nacos/v2/console/namespace（参数 namespaceId）
         - v3：PUT /v3/console/core/namespace（Console API）
         """
+        if not _is_confirmed(confirm):
+            return _cancelled()
         try:
             if ctx:
                 await ctx.report_progress(0, 0, f"正在更新命名空间：namespaceId={namespace_id}, name={namespace_name}")
@@ -828,14 +950,28 @@ if not _read_only:
             if success:
                 if ctx:
                     await ctx.report_progress(0, 0, f"命名空间更新成功：namespaceId={namespace_id}")
-                return f"命名空间更新成功：namespaceId={namespace_id}"
-            return "命名空间更新失败：未知原因"
+                return CallToolResult(
+                    content=[TextContent(text=f"命名空间更新成功：namespaceId={namespace_id}")],
+                    structured_content={
+                        "success": True,
+                        "namespace_id": namespace_id,
+                        "namespace_name": namespace_name,
+                    },
+                )
+            return CallToolResult(
+                content=[TextContent(text="命名空间更新失败：未知原因")],
+                structured_content={"success": False},
+            )
         except Exception as e:
-            return handle_error(e)
+            return CallToolResult(
+                content=[TextContent(text=handle_error(e))],
+                structured_content={},
+            )
 
     @mcp.tool(
         name="nacos_delete_namespace",
         annotations=_rw("删除命名空间", destructive=True, idempotent=True),
+        structured_output=True,
     )
     async def nacos_delete_namespace(
         namespace_id: Annotated[
@@ -845,8 +981,12 @@ if not _read_only:
                 min_length=1,
             ),
         ],
+        confirm: Annotated[
+            ElicitationResult[_ConfirmSchema],
+            Resolve(_delete_namespace_resolver),
+        ],
         ctx: Optional[Context] = None,
-    ) -> str:
+    ) -> CallToolResult:
         """删除指定命名空间（会一并清除其下所有配置）。
 
         对应 Nacos OpenAPI：
@@ -854,21 +994,32 @@ if not _read_only:
         - v2：DELETE /nacos/v2/console/namespace（参数 namespaceId）
         - v3：DELETE /v3/console/core/namespace（Console API）
         """
+        if not _is_confirmed(confirm):
+            return _cancelled()
         try:
             if ctx:
-                proceed, msg = await _confirm_action(ctx, f"删除命名空间 {namespace_id}（将清除其下所有配置）")
-                if not proceed:
-                    return msg
                 await ctx.report_progress(0, 0, f"正在删除命名空间：namespaceId={namespace_id}")
             nacos_client = await get_nacos_client()
             success = await nacos_client.delete_namespace(namespace_id=namespace_id)
             if success:
                 if ctx:
                     await ctx.report_progress(0, 0, f"命名空间删除成功：namespaceId={namespace_id}")
-                return f"命名空间删除成功：namespaceId={namespace_id}"
-            return "命名空间删除失败：未知原因"
+                return CallToolResult(
+                    content=[TextContent(text=f"命名空间删除成功：namespaceId={namespace_id}")],
+                    structured_content={
+                        "success": True,
+                        "namespace_id": namespace_id,
+                    },
+                )
+            return CallToolResult(
+                content=[TextContent(text="命名空间删除失败：未知原因")],
+                structured_content={"success": False},
+            )
         except Exception as e:
-            return handle_error(e)
+            return CallToolResult(
+                content=[TextContent(text=handle_error(e))],
+                structured_content={},
+            )
 
 
 def _normalize_transport(raw: Optional[str]) -> str:

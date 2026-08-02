@@ -8,7 +8,7 @@ Nacos MCP Server —— 让 AI 助手查询与管理 Nacos 配置。
 
 - **多协议传输**：`stdio`（默认）、`sse`、`streamable-http`
 - **HTTP 接口认证**：Bearer Token 保护，未授权请求返回 `401`
-- **MRTR 确认**：删除配置 / 删除命名空间等破坏性操作触发 MCP 2.0 Elicitation 确认
+- **写前确认**：所有写操作通过 MCP 原生 Elicitation（`Resolve` + `Elicit`）二次确认，客户端不支持时 fail-closed 拒绝执行
 - **MCP Resources**：`nacos://` URI 暴露命名空间等只读元数据
 - **Stateless HTTP**：无会话状态，适配 Serverless / 多副本部署
 - **灵活部署**：`uvx` 免安装、Docker 公开镜像、或本地构建
@@ -114,7 +114,7 @@ docker run -d -p 8000:8000 \
 |------|---------------|------|------|----------|
 | `nacos_get_config` | GET `/cs/config` | 读 | 按 dataId + group + namespace 获取配置 | ✅ |
 | `nacos_publish_config` | POST `/cs/config` | 写 | 发布 / 更新配置 | ❌ |
-| `nacos_delete_config` | DELETE `/cs/config` | 写 | 删除配置（MRTR 确认） | ❌ |
+| `nacos_delete_config` | DELETE `/cs/config` | 写 | 删除配置（写前确认） | ❌ |
 | `nacos_list_config_history` | GET `/cs/history/list` | 读 | 配置历史列表（分页） | ✅ |
 | `nacos_get_config_history` | GET `/cs/history` | 读 | 指定 nid 历史详情 | ✅ |
 | `nacos_get_config_previous` | GET `/cs/history/previous` | 读 | 配置上一版本 | ✅ |
@@ -123,7 +123,7 @@ docker run -d -p 8000:8000 \
 | `nacos_get_namespace` | GET `/console/namespace` | 读 | 查询单个命名空间（v1 由列表过滤模拟） | ✅ |
 | `nacos_create_namespace` | POST `/console/namespace` | 写 | 创建命名空间 | ❌ |
 | `nacos_update_namespace` | PUT `/console/namespace` | 写 | 编辑命名空间 | ❌ |
-| `nacos_delete_namespace` | DELETE `/console/namespace` | 写 | 删除命名空间（MRTR 确认） | ❌ |
+| `nacos_delete_namespace` | DELETE `/console/namespace` | 写 | 删除命名空间（写前确认） | ❌ |
 
 **版本端点差异**：
 
@@ -135,9 +135,9 @@ docker run -d -p 8000:8000 \
 
 v3 创建命名空间字段为 `customNamespaceId`（同 v1），编辑/删除用 `namespaceId`。
 
-**只读模式**：写工具在 `NACOS_READ_ONLY=true` 时注册期排除，Agent 看不到也调不到。
+**只读模式（默认）**：`NACOS_READ_ONLY` 默认 `true`，写工具不注册，Agent 看不到也调不到；设为 `false` 开启写工具。
 
-**MRTR 降级**：stdios 等不支持 Elicitation 的客户端，破坏性操作直接执行。
+**写前确认**：所有写操作通过 MCP 原生 Elicitation 二次确认；stdio 等不支持 Elicitation 的客户端，SDK 直接返回 `-32021` 拒绝执行（fail-closed）。
 
 ### Nacos 概念
 
@@ -174,13 +174,15 @@ v3 创建命名空间字段为 `customNamespaceId`（同 v1），编辑/删除�
 | `NACOS_PASSWORD` | 密码 | - |
 | `NACOS_NAMESPACE` | 默认命名空间 ID | `public` |
 | `NACOS_VERSION` | Nacos 版本：`1` / `2` / `3` | `3` |
-| `NACOS_READ_ONLY` | 只读模式（禁用写工具） | `false` |
+| `NACOS_READ_ONLY` | 只读模式（禁用写工具） | `true` |
 | `NACOS_INSECURE` | 跳过 TLS 证书验证（自签名 / 内部 CA 场景） | `false` |
 
-### 只读模式
+### 只读模式（默认）
+
+默认只读，写工具不注册。需写操作时显式关闭：
 
 ```json
-{ "env": { "NACOS_READ_ONLY": "true" } }
+{ "env": { "NACOS_READ_ONLY": "false" } }
 ```
 
 ### TLS 证书验证
@@ -325,7 +327,7 @@ server:
 删除 dev 命名空间下 group=DEFAULT_GROUP、dataId=legacy.properties 的配置
 ```
 
-> 删除属破坏性操作，支持 MRTR 的客户端会弹出 Elicitation 二次确认；stdio 等不支持的客户端直接执行。
+> 所有写操作（发布 / 删除 / 命名空间增删改）均需 MCP 原生 Elicitation 二次确认；不支持 Elicitation 的客户端（如 stdio）由 SDK 直接返回 `-32021` 拒绝执行。
 
 ### 命名空间管理
 
@@ -363,9 +365,9 @@ server:
 把 test 命名空间的 user-service.yaml 配置同步发布到 prod 命名空间
 ```
 
-### 只读模式（`NACOS_READ_ONLY=true`）
+### 默认只读
 
-写工具（发布 / 删除 / 命名空间增删改）在只读模式下不注册，AI 只能执行查询类操作：
+默认 `NACOS_READ_ONLY=true`，写工具（发布 / 删除 / 命名空间增删改）不注册，AI 只能执行查询类操作：
 
 ```
 只读模式下：帮我删除 dataId=legacy.properties 的配置
