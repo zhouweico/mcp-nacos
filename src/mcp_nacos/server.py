@@ -551,7 +551,8 @@ async def nacos_list_configs(
     data_id: Annotated[
         Optional[str],
         Field(description=(
-            "按 dataId 过滤（可选）。search=blur 下需显式带通配符如 '*app*'，裸子串 'app' 不命中；完整 dataId 精确命中。"
+            "按 dataId 过滤（可选）。search=blur 下需显式带通配符如 '*app*'，"
+            "裸子串 'app' 不命中；完整 dataId 精确命中。"
         )),
     ] = None,
     group_name: Annotated[

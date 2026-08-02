@@ -396,7 +396,9 @@ async def test_list_configs_shape(version, http_mock):
     assert isinstance(result["configs"], list) and result["configs"], f"[{version}] configs 应为非空列表"
     first = result["configs"][0]
     assert "data_id" in first and "group_name" in first, f"[{version}] 元素应含 data_id/group_name，实际 {first}"
-    assert captured["params"].get("search") == "blur", f"[{version}] search=blur 应被默认下发，实际 {captured['params']}"
+    assert captured["params"].get("search") == "blur", (
+        f"[{version}] search=blur 应被默认下发，实际 {captured['params']}"
+    )
 
 
 # ---------------------------------------------------------------------------

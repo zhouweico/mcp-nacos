@@ -127,6 +127,9 @@ class NacosClientProtocol(Protocol):
 
     async def delete_namespace(self, namespace_id: str) -> bool: ...
 
+    # ---- 生命周期 ----
+    async def aclose(self) -> None: ...
+
 
 class NacosAuthBase:
     """1.x/2.x 共用的鉴权与 HTTP 基类"""
