@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 (2026-08-02)
+
+### 新增
+
+- **GitHub Actions 工作流**：`ci.yml`（push/PR 到 main 跑 ruff/mypy/pytest 多版本测试、构建 dist、Docker stdio 冒烟）与 `release.yml`（打 v* tag 时校验版本号/CHANGELOG、推多架构 GHCR 镜像、PyPI OIDC 可信发布、GitHub Release）。PyPI 发布改用 Trusted Publisher（OIDC），无需长期令牌。
+
+### 修复
+
+- 补 `NacosClientProtocol.aclose` 协议方法声明，对齐 apisix 范式，修复 mypy strict 报协议缺 aclose。
+- 拆分 `server.py` / `test_clients.py` 中超 120 列长字符串字面量（ruff E501 存量问题）。
+
 ## 0.5.1 (2026-07-31)
 
 ### 修复
