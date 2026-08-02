@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 (2026-08-02)
+
+### 变更
+
+- **默认只读**：`NACOS_READ_ONLY` 默认值由 `false` 改为 `true`，未显式配置时写工具不注册，需显式设为 `false` 开启。
+- **写前确认迁移到 MCP 原生方式**：移除旧 `ctx.elicit()` + fail-open 降级，改为 `Resolve(fn)` + `Elicit` 原生参数注入（fail-closed）；客户端不支持 Elicitation 时 SDK 直接返回 `-32021` 拒绝，写工具不再执行。5 个写工具各配专属 resolver 展示关键标识。
+- **写工具结构化输出**：5 个写工具声明 `structured_output=True`，返回 `CallToolResult`（含 `structured_content` 字段），便于客户端结构化解析操作结果。
+
 ## 0.5.2 (2026-08-02)
 
 ### 新增
