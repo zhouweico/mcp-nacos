@@ -159,7 +159,7 @@ v3 创建命名空间字段为 `customNamespaceId`（同 v1），编辑/删除�
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `MCP_TRANSPORT` | 传输协议：`stdio` / `sse` / `streamable-http` | `stdio` |
-| `MCP_HOST` | HTTP 监听地址（stdio 忽略） | `0.0.0.0` |
+| `MCP_HOST` | HTTP 监听地址（stdio 忽略），默认仅本地回环；对外暴露需显式设置并务必配置 `MCP_AUTH_TOKEN` | `127.0.0.1` |
 | `MCP_PORT` | HTTP 监听端口（stdio 忽略） | `8000` |
 | `MCP_AUTH_TOKEN` | 非空时启用 Bearer Token 认证 | -（不鉴权） |
 | `MCP_STATELESS_HTTP` | 启用无状态 HTTP（适配 Serverless） | `false` |
@@ -237,7 +237,7 @@ Authorization: Bearer <MCP_AUTH_TOKEN>
 ```bash
 MCP_TRANSPORT=streamable-http \
 MCP_STATELESS_HTTP=true \
-MCP_HOST=0.0.0.0 MCP_PORT=8000 \
+MCP_PORT=8000 \
 mcp-nacos
 ```
 

@@ -7,11 +7,12 @@ services:
     container_name: mcp-nacos
     restart: unless-stopped
     ports:
-      - "${MCP_PORT:-8000}:8000"
+      # 默认仅发布到宿主机回环；对外暴露去掉 127.0.0.1: 前缀并配置 MCP_AUTH_TOKEN
+      - "127.0.0.1:8000:8000"
     environment:
       # MCP 传输与认证
       MCP_TRANSPORT: "${MCP_TRANSPORT:-streamable-http}"
-      MCP_HOST: "0.0.0.0"
+      MCP_HOST: "0.0.0.0"   # 容器内端口映射所需，暴露面由 ports 宿主绑定决定
       MCP_PORT: "8000"
       MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
       MCP_STATELESS_HTTP: "${MCP_STATELESS_HTTP:-false}"
