@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 (2026-08-04)
+
+### 变更
+
+- **`MCP_HOST` 默认改为 `127.0.0.1`**：HTTP 传输默认仅监听本地回环；对外暴露需显式设为 `0.0.0.0` 或具体 IP，并务必配置 `MCP_AUTH_TOKEN`
+- **docker-compose 默认仅发布到宿主机回环**：ports 改为 `127.0.0.1:8000:8000`
+- **DNS 重绑定防护**：监听回环时由 mcp SDK 自动开启 Host/Origin 校验（防浏览器重绑定攻击），sse / streamable-http 两种传输策略一致；对外暴露时显式关闭防护并告警，安全交由 `MCP_AUTH_TOKEN` Bearer 认证
+- README / `.env.example` 同步 `MCP_HOST` 默认值与回环暴露说明
+
 ## 0.6.0 (2026-08-02)
 
 ### 变更
